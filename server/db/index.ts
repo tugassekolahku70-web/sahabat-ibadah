@@ -25,8 +25,22 @@ const txStorage = new AsyncLocalStorage<pg.PoolClient>();
 
 if (isPostgres) {
   console.log("🐘 Menggunakan Supabase PostgreSQL sebagai database cloud.");
+  
+  // Izinkan sertifikat SSL Supabase Pooler tanpa error self-signed certificate
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+  let cleanUrl = (process.env.DATABASE_URL || "").trim();
+  try {
+    const parsed = new URL(cleanUrl);
+    parsed.searchParams.delete("sslmode");
+    parsed.searchParams.delete("ssl");
+    cleanUrl = parsed.toString();
+  } catch {
+    cleanUrl = cleanUrl.replace(/[?&]sslmode=[^&]+/g, "").replace(/[?&]ssl=[^&]+/g, "");
+  }
+
   pgPool = new pg.Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: cleanUrl,
     ssl: {
       rejectUnauthorized: false,
     },
