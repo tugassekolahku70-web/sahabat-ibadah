@@ -1,4 +1,5 @@
 import { db, hashPassword, initSchema, nowISO } from "./index.js";
+import { seed50Students } from "./seed_50_students.js";
 
 export function seedDatabase() {
   console.log("🌱 Memulai seeding database lokal Sahabat Ibadah...");
@@ -280,6 +281,9 @@ export function seedDatabase() {
       );
     }
   }
+
+  // Seeding 50 Siswa (Kelas 1A & 2A) beserta orang tua dan histori checklist 4 Ags - 17 Sept
+  seed50Students();
 
   console.log("✅ Seeding database lokal selesai dengan sukses!");
   console.log("----------------------------------------------------------------");
