@@ -5,18 +5,28 @@ import {
   Award,
   Bell,
   BookOpen,
+  Calendar,
   CalendarDays,
   Camera,
   Check,
   CheckCheck,
   CheckCircle2,
+  CheckSquare,
   ChevronLeft,
   ChevronDown,
   ChevronRight,
   CircleHelp,
   ClipboardCheck,
+  Clock,
+  Compass,
   Copy,
+  Download,
   Edit2,
+  Eye,
+  EyeOff,
+  FileDown,
+  FileSpreadsheet,
+  FileText,
   Flame,
   GraduationCap,
   Heart,
@@ -45,6 +55,7 @@ import {
   Settings,
   Share2,
   ShieldCheck,
+  Smile,
   Sparkles,
   Star,
   Sun,
@@ -56,8 +67,6 @@ import {
   UserRound,
   Users,
   X,
-  FileDown,
-  FileText,
 } from "lucide-react";
 import api, {
   getStoredToken,
@@ -78,7 +87,7 @@ const heroImage = "/assets/hero-family.png";
 const homeImage = "/assets/home-family.png";
 
 type Role = "parent" | "teacher";
-type Tab = "overview" | "checklist" | "progress" | "reports" | "messages" | "settings";
+type Tab = "overview" | "checklist" | "progress" | "habits" | "reports" | "messages" | "settings";
 
 type Habit = {
   id: string;
@@ -100,6 +109,14 @@ const iconMap: Record<string, any> = {
   Star,
   Sparkles,
   ClipboardCheck,
+  CheckSquare,
+  Award,
+  ShieldCheck,
+  Clock,
+  Smile,
+  Compass,
+  Leaf,
+  CheckCircle2,
 };
 
 const categoryColorMap: Record<string, string> = {
@@ -111,7 +128,52 @@ const categoryColorMap: Record<string, string> = {
   isha: "indigo",
   kindness: "rose",
   dua: "teal",
+  ibadah_wajib: "amber",
+  ibadah_harian: "emerald",
+  kebiasaan_baik: "sky",
 };
+
+function formatDateIndo(dateStr: string): string {
+  try {
+    const [year, month, day] = dateStr.split("-").map(Number);
+    const d = new Date(year, month - 1, day);
+    const dayNames = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+    const monthNames = [
+      "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+      "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+    ];
+    return `${dayNames[d.getDay()]}, ${day} ${monthNames[month - 1]} ${year}`;
+  } catch {
+    return dateStr;
+  }
+}
+
+function getTodayStr(): string {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getYesterdayStr(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDaysToStr(dateStr: string, days: number): string {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const d = new Date(year, month - 1, day);
+  d.setDate(d.getDate() + days);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dt = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dt}`;
+}
 
 const menuParent: { id: Tab; label: string; icon: any }[] = [
   { id: "overview", label: "Dashboard", icon: HomeIcon },
@@ -125,6 +187,7 @@ const menuParent: { id: Tab; label: string; icon: any }[] = [
 const menuTeacher: { id: Tab; label: string; icon: any }[] = [
   { id: "overview", label: "Dashboard Kelas", icon: HomeIcon },
   { id: "progress", label: "Daftar Siswa", icon: Users },
+  { id: "habits", label: "Butir Ibadah", icon: Sparkles },
   { id: "reports", label: "Laporan Mingguan", icon: CalendarDays },
   { id: "messages", label: "Pesan Orang Tua", icon: MessageCircle },
   { id: "settings", label: "Pengaturan & Profil", icon: Settings },
@@ -250,6 +313,7 @@ function ParentOverview({
   schoolInfo,
   onNavigate,
   onSelectChild,
+  onGoToChecklistDate,
 }: {
   user: UserSession | null;
   child: any;
@@ -263,6 +327,7 @@ function ParentOverview({
   schoolInfo?: { name: string; logoUrl: string | null } | null;
   onNavigate: (tab: Tab) => void;
   onSelectChild?: (c: any) => void;
+  onGoToChecklistDate?: (date: string) => void;
 }) {
   const percentage = habits.length > 0 ? Math.round((completedCount / habits.length) * 100) : 0;
   return (
@@ -395,6 +460,20 @@ function ParentOverview({
             <button className="primary-button" onClick={() => onNavigate("checklist")}>
               <ClipboardCheck size={17} /> Isi checklist hari ini
             </button>
+            <button
+              className="ghost-button"
+              onClick={() => {
+                if (onGoToChecklistDate) {
+                  onGoToChecklistDate(getYesterdayStr());
+                } else {
+                  onNavigate("checklist");
+                }
+              }}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+              title="Lengkapi mutaba'ah hari kemarin yang belum sempat dicentang"
+            >
+              <CalendarDays size={16} /> Isi Tanggal Kemarin
+            </button>
             <button className="ghost-button" onClick={() => onNavigate("progress")}>
               Lihat progres <ArrowUpRight size={17} />
             </button>
@@ -510,11 +589,238 @@ function ParentOverview({
   );
 }
 
+function CalendarModal({
+  isOpen,
+  onClose,
+  selectedDate,
+  onSelectDate,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  selectedDate: string;
+  onSelectDate: (date: string) => void;
+}) {
+  const todayStr = getTodayStr();
+  const [currentYear, setCurrentYear] = useState(() => {
+    return Number(selectedDate.split("-")[0]) || new Date().getFullYear();
+  });
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    return (Number(selectedDate.split("-")[1]) || (new Date().getMonth() + 1)) - 1;
+  });
+
+  useEffect(() => {
+    if (isOpen && selectedDate) {
+      const parts = selectedDate.split("-").map(Number);
+      if (parts.length === 3) {
+        setCurrentYear(parts[0]);
+        setCurrentMonth(parts[1] - 1);
+      }
+    }
+  }, [isOpen, selectedDate]);
+
+  if (!isOpen) return null;
+
+  const monthNames = [
+    "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+    "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+  ];
+  const dayLabels = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+
+  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const firstDayIndex = new Date(currentYear, currentMonth, 1).getDay();
+
+  const handlePrevMonth = () => {
+    if (currentMonth === 0) {
+      setCurrentMonth(11);
+      setCurrentYear((y) => y - 1);
+    } else {
+      setCurrentMonth((m) => m - 1);
+    }
+  };
+
+  const handleNextMonth = () => {
+    if (currentMonth === 11) {
+      setCurrentMonth(0);
+      setCurrentYear((y) => y + 1);
+    } else {
+      setCurrentMonth((m) => m + 1);
+    }
+  };
+
+  const yearOptions = [2024, 2025, 2026, 2027];
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(10, 34, 29, 0.78)", display: "grid", placeItems: "center", padding: 16 }}>
+      <div className="panel" style={{ width: "100%", maxWidth: 380, padding: 22, background: "#fff", borderRadius: 18, border: "1px solid #cbe3dc", boxShadow: "0 20px 45px rgba(10,48,40,.22)" }}>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: "#e8f7f2", color: "#0c9d80", display: "grid", placeItems: "center" }}>
+              <CalendarDays size={18} />
+            </div>
+            <div>
+              <strong style={{ fontSize: 14, color: "#174e46" }}>Pilih Tanggal Checklist</strong>
+              <div style={{ fontSize: 10, color: "#597c74" }}>Lengkapi amalan yang terlewat</div>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#618b80" }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Month & Year Navigation */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 14, background: "#f8faf9", padding: "6px 10px", borderRadius: 10, border: "1px solid #e1ede8" }}>
+          <button
+            type="button"
+            onClick={handlePrevMonth}
+            className="ghost-button"
+            style={{ padding: "4px 8px", borderRadius: 6, cursor: "pointer", border: "none" }}
+            title="Bulan Sebelumnya"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <select
+              value={currentMonth}
+              onChange={(e) => setCurrentMonth(Number(e.target.value))}
+              style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #cbe3dc", fontSize: 12, fontWeight: 700, color: "#164e43", background: "#fff", cursor: "pointer" }}
+            >
+              {monthNames.map((name, idx) => (
+                <option key={idx} value={idx}>{name}</option>
+              ))}
+            </select>
+            <select
+              value={currentYear}
+              onChange={(e) => setCurrentYear(Number(e.target.value))}
+              style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #cbe3dc", fontSize: 12, fontWeight: 700, color: "#164e43", background: "#fff", cursor: "pointer" }}
+            >
+              {yearOptions.map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={handleNextMonth}
+            className="ghost-button"
+            style={{ padding: "4px 8px", borderRadius: 6, cursor: "pointer", border: "none" }}
+            title="Bulan Berikutnya"
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
+
+        {/* Days Header */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", textAlign: "center", fontSize: 11, fontWeight: 700, color: "#7a9b94", marginBottom: 6 }}>
+          {dayLabels.map((lbl, i) => (
+            <div key={i} style={{ color: i === 0 ? "#dc2626" : i === 5 ? "#0c9d80" : "#597c74" }}>
+              {lbl}
+            </div>
+          ))}
+        </div>
+
+        {/* Days Grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+          {Array.from({ length: firstDayIndex }).map((_, i) => (
+            <div key={`blank-${i}`} style={{ height: 34 }} />
+          ))}
+
+          {Array.from({ length: daysInMonth }).map((_, i) => {
+            const dayNum = i + 1;
+            const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
+            const isFuture = dateStr > todayStr;
+            const isSelected = dateStr === selectedDate;
+            const isToday = dateStr === todayStr;
+
+            return (
+              <button
+                key={dayNum}
+                type="button"
+                disabled={isFuture}
+                onClick={() => {
+                  onSelectDate(dateStr);
+                  onClose();
+                }}
+                style={{
+                  height: 34,
+                  borderRadius: 8,
+                  border: isToday ? "1.5px solid #0c9d80" : "1px solid transparent",
+                  background: isSelected
+                    ? "#0c9d80"
+                    : isToday
+                    ? "#e8f7f2"
+                    : "transparent",
+                  color: isSelected
+                    ? "#ffffff"
+                    : isFuture
+                    ? "#c0d0cc"
+                    : isToday
+                    ? "#0c9d80"
+                    : "#1c4940",
+                  fontWeight: isSelected || isToday ? 700 : 500,
+                  fontSize: 12,
+                  cursor: isFuture ? "not-allowed" : "pointer",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  transition: "all 0.15s ease",
+                  opacity: isFuture ? 0.45 : 1,
+                }}
+              >
+                <span>{dayNum}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Quick Footer */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14, paddingTop: 12, borderTop: "1px solid #edf4f1", gap: 8 }}>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => {
+                onSelectDate(todayStr);
+                onClose();
+              }}
+              style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, background: "#f0f8f5", color: "#166534" }}
+            >
+              Hari Ini
+            </button>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => {
+                onSelectDate(getYesterdayStr());
+                onClose();
+              }}
+              style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, background: "#fffbeb", color: "#92400e" }}
+            >
+              Kemarin
+            </button>
+          </div>
+          <button
+            type="button"
+            className="outline-button"
+            onClick={onClose}
+            style={{ fontSize: 11, padding: "5px 12px" }}
+          >
+            Tutup
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ChecklistPage({
   child,
   habits,
   streak,
   parentNote,
+  selectedDate,
+  onSelectDate,
   onToggle,
   onSave,
   onNoteChange,
@@ -523,11 +829,24 @@ function ChecklistPage({
   habits: Habit[];
   streak: number;
   parentNote: string;
+  selectedDate: string;
+  onSelectDate: (date: string) => void;
   onToggle: (id: string) => void;
   onSave: () => void;
   onNoteChange: (note: string) => void;
 }) {
-  const categories = ["Ibadah wajib", "Ibadah harian", "Kebiasaan baik"];
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const todayStr = getTodayStr();
+  const yesterdayStr = getYesterdayStr();
+  const isBackdate = selectedDate < todayStr;
+  const isNextDisabled = selectedDate >= todayStr;
+
+  const preferredOrder = ["Ibadah wajib", "Ibadah harian", "Kebiasaan baik"];
+  const presentCategories = Array.from(new Set(habits.map((h) => h.category).filter(Boolean)));
+  const categories = Array.from(new Set([...preferredOrder, ...presentCategories])).filter(
+    (cat) => habits.some((h) => h.category === cat)
+  );
+
   const completedCount = habits.filter((h) => h.checked).length;
   const percentage = habits.length > 0 ? Math.round((completedCount / habits.length) * 100) : 0;
 
@@ -535,20 +854,213 @@ function ChecklistPage({
     <section className="page-stack">
       <div className="page-intro">
         <div>
-          <div className="section-kicker">Hari ini</div>
-          <h1>Checklist Ibadah Harian</h1>
-          <p>Centang kebiasaan baik {child?.preferred_name || "anak"} yang sudah dilakukan hari ini.</p>
+          <div className="section-kicker">{isBackdate ? formatDateIndo(selectedDate) : "Hari ini"}</div>
+          <h1>{isBackdate ? "Checklist Ibadah (Tanggal Lampau)" : "Checklist Ibadah Harian"}</h1>
+          <p>
+            {isBackdate
+              ? `Lengkapi catatan ibadah ${child?.preferred_name || "anak"} yang terlewat untuk tanggal ${formatDateIndo(selectedDate)}.`
+              : `Centang kebiasaan baik ${child?.preferred_name || "anak"} yang sudah dilakukan hari ini.`}
+          </p>
         </div>
         <button className="primary-button" onClick={onSave}>
           <CheckCircle2 size={17} /> Simpan checklist ke Database
         </button>
       </div>
 
+      {/* Navigasi Kalender & Backdate Bar */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          background: isBackdate ? "#fffbeb" : "#ffffff",
+          padding: "10px 16px",
+          borderRadius: 14,
+          border: isBackdate ? "1px solid #fde68a" : "1px solid #dbeef5",
+          boxShadow: "0 2px 8px rgba(35,110,95,0.04)",
+          marginBottom: 16,
+          flexWrap: "wrap",
+          gap: 10,
+        }}
+      >
+        {/* Left: Previous / Next Date Controls */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => onSelectDate(addDaysToStr(selectedDate, -1))}
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              border: "1px solid #cbe3dc",
+              background: "#fff",
+              display: "grid",
+              placeItems: "center",
+              cursor: "pointer",
+              color: "#164e43",
+            }}
+            title="1 Hari Sebelumnya"
+          >
+            <ChevronLeft size={16} />
+          </button>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                background: isBackdate ? "#fef3c7" : "#e8f7f2",
+                color: isBackdate ? "#b45309" : "#0c9d80",
+                display: "grid",
+                placeItems: "center",
+              }}
+            >
+              <CalendarDays size={17} />
+            </div>
+            <div>
+              <strong style={{ fontSize: 13, color: isBackdate ? "#92400e" : "#164e43", display: "block" }}>
+                {formatDateIndo(selectedDate)}
+              </strong>
+              <span style={{ fontSize: 10, color: isBackdate ? "#b45309" : "#618b80", fontWeight: 600 }}>
+                {selectedDate === todayStr
+                  ? "● Hari Ini (Aktif)"
+                  : selectedDate === yesterdayStr
+                  ? "⚠️ Kemarin (Terlewat)"
+                  : "⚠️ Tanggal Lampau (Terlewat)"}
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            disabled={isNextDisabled}
+            onClick={() => onSelectDate(addDaysToStr(selectedDate, 1))}
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              border: "1px solid #cbe3dc",
+              background: isNextDisabled ? "#f3f4f6" : "#fff",
+              display: "grid",
+              placeItems: "center",
+              cursor: isNextDisabled ? "not-allowed" : "pointer",
+              color: isNextDisabled ? "#9ca3af" : "#164e43",
+              opacity: isNextDisabled ? 0.5 : 1,
+            }}
+            title="1 Hari Berikutnya"
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
+
+        {/* Right: Quick Action Chips */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => onSelectDate(todayStr)}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 8,
+              fontSize: 11,
+              fontWeight: 700,
+              border: selectedDate === todayStr ? "1.5px solid #0c9d80" : "1px solid #d4ebe5",
+              background: selectedDate === todayStr ? "#0c9d80" : "#fff",
+              color: selectedDate === todayStr ? "#fff" : "#185347",
+              cursor: "pointer",
+            }}
+          >
+            Hari Ini
+          </button>
+          <button
+            type="button"
+            onClick={() => onSelectDate(yesterdayStr)}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 8,
+              fontSize: 11,
+              fontWeight: 700,
+              border: selectedDate === yesterdayStr ? "1.5px solid #d97706" : "1px solid #fde68a",
+              background: selectedDate === yesterdayStr ? "#d97706" : "#fffbeb",
+              color: selectedDate === yesterdayStr ? "#fff" : "#92400e",
+              cursor: "pointer",
+            }}
+          >
+            Kemarin
+          </button>
+          <button
+            type="button"
+            onClick={() => setCalendarOpen(true)}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 8,
+              fontSize: 11,
+              fontWeight: 700,
+              border: "1px solid #b2ded1",
+              background: "#e8f7f2",
+              color: "#166534",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+            }}
+          >
+            <Calendar size={13} /> Pilih Tanggal
+          </button>
+        </div>
+      </div>
+
+      {/* Banner Peringatan Backdate */}
+      {isBackdate && (
+        <div
+          style={{
+            background: "#fffbeb",
+            border: "1px solid #fde68a",
+            borderRadius: 12,
+            padding: "12px 16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 10,
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: "#fef3c7", color: "#b45309", display: "grid", placeItems: "center" }}>
+              <CalendarDays size={18} />
+            </div>
+            <div>
+              <strong style={{ fontSize: 13, color: "#92400e" }}>Mode Mengisi Checklist Terlewat ({formatDateIndo(selectedDate)})</strong>
+              <div style={{ fontSize: 11, color: "#b45309" }}>
+                Centang ibadah yang terlaksana pada hari ini. Skor, poin, dan histori akan otomatis disinkronkan.
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onSelectDate(todayStr)}
+            style={{
+              padding: "6px 14px",
+              borderRadius: 8,
+              fontSize: 11,
+              fontWeight: 700,
+              background: "#0c9d80",
+              color: "#fff",
+              border: "none",
+              cursor: "pointer",
+            }}
+          >
+            Kembali ke Hari Ini
+          </button>
+        </div>
+      )}
+
       <div className="child-switcher">
         <Avatar initials="AF" tone="blue" />
         <div>
           <strong>{child?.full_name || "Ahmad Fauzan"}</strong>
-          <span>{child?.grade_level || "Kelas 4 SD"} · Hari ini</span>
+          <span>{child?.grade_level || "Kelas 4 SD"} · {formatDateIndo(selectedDate)}</span>
         </div>
         <ChevronDown size={17} />
       </div>
@@ -603,7 +1115,7 @@ function ChecklistPage({
         <aside className="panel today-panel">
           <div className="panel-heading">
             <div>
-              <div className="section-kicker">Progres hari ini</div>
+              <div className="section-kicker">{isBackdate ? "Progres tanggal ini" : "Progres hari ini"}</div>
               <h2>{child?.full_name || "Ahmad Fauzan"}</h2>
             </div>
             <MoreHorizontal size={18} />
@@ -612,7 +1124,7 @@ function ChecklistPage({
             <Ring value={percentage} label="selesai" />
           </div>
           <div className="today-stat">
-            <span>Target hari ini</span>
+            <span>{isBackdate ? "Capaian tanggal ini" : "Target hari ini"}</span>
             <b>{completedCount} dari {habits.length} kebiasaan</b>
           </div>
           <div className="streak-card">
@@ -624,6 +1136,14 @@ function ChecklistPage({
           </div>
         </aside>
       </div>
+
+      {/* Pop up Kalender Modal */}
+      <CalendarModal
+        isOpen={calendarOpen}
+        onClose={() => setCalendarOpen(false)}
+        selectedDate={selectedDate}
+        onSelectDate={onSelectDate}
+      />
     </section>
   );
 }
@@ -914,6 +1434,7 @@ function TeacherStudentList({
   onOpenParentAccount,
   onOpenResetParentPassword,
   onOpenChatWithStudent,
+  onOpenBulkStudent,
 }: {
   classes: any[];
   activeClassId: string;
@@ -925,6 +1446,7 @@ function TeacherStudentList({
   onOpenParentAccount: (student: any) => void;
   onOpenResetParentPassword: (student: any) => void;
   onOpenChatWithStudent: (student: any) => void;
+  onOpenBulkStudent: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "no_parent" | "active_parent" | "completed">("all");
@@ -959,9 +1481,31 @@ function TeacherStudentList({
           <h1>Daftar Siswa & Panel Orang Tua</h1>
           <p>Kelola data siswa {activeClass?.name}, ganti foto profil siswa, dan buat akun login ke panel orang tua.</p>
         </div>
-        <button className="primary-button" onClick={onOpenAddStudent}>
-          <UserPlus size={16} /> Tambah Siswa Baru
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onOpenBulkStudent}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "9px 14px",
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 700,
+              background: "#e8f7f2",
+              color: "#166534",
+              border: "1px solid #b2ded1",
+              cursor: "pointer",
+            }}
+          >
+            <Upload size={15} /> Pendaftaran Masal (Import)
+          </button>
+          <button className="primary-button" onClick={onOpenAddStudent}>
+            <UserPlus size={16} /> Tambah Siswa Baru
+          </button>
+        </div>
       </div>
 
       {/* Baris Pemilihan Kelas */}
@@ -1292,6 +1836,950 @@ function TeacherStudentList({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// MODAL PENDAFTARAN SISWA & ORANG TUA SECARA MASAL (BULK IMPORT GURU)
+// =============================================================================
+
+function BulkStudentModal({
+  isOpen,
+  onClose,
+  classes,
+  activeClassId,
+  onSuccess,
+  showToast,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  classes: any[];
+  activeClassId: string;
+  onSuccess: () => void;
+  showToast: (msg: string) => void;
+}) {
+  const [selectedClassId, setSelectedClassId] = useState(activeClassId || classes[0]?.id || "");
+  const [inputMode, setInputMode] = useState<"paste" | "upload">("paste");
+  const [rawText, setRawText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [resultData, setResultData] = useState<{ count: number; students: any[] } | null>(null);
+
+  useEffect(() => {
+    if (activeClassId) setSelectedClassId(activeClassId);
+  }, [activeClassId]);
+
+  // Parse baris teks masal
+  const parsedRows = useMemo(() => {
+    if (!rawText.trim()) return [];
+    const lines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const results: Array<{
+      full_name: string;
+      preferred_name: string;
+      parent_name: string;
+      parent_email: string;
+      parent_password?: string;
+      parent_phone?: string;
+      isValid: boolean;
+      error?: string;
+    }> = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // Lewati header jika baris pertama memuat kata header umum
+      if (i === 0 && (line.toLowerCase().includes("nama") || line.toLowerCase().includes("student") || line.toLowerCase().includes("wali"))) {
+        continue;
+      }
+
+      // Deteksi separator: tab (\t), comma (,), semicolon (;), atau pipe (|)
+      let cols: string[] = [];
+      if (line.includes("\t")) {
+        cols = line.split("\t");
+      } else if (line.includes("|")) {
+        cols = line.split("|");
+      } else if (line.includes(";")) {
+        cols = line.split(";");
+      } else if (line.includes(",")) {
+        cols = line.split(",");
+      } else {
+        cols = [line];
+      }
+
+      const cleanCols = cols.map((c) => c.replace(/^["']|["']$/g, "").trim());
+      const fullName = cleanCols[0] || "";
+      const preferred = cleanCols[1] || (fullName ? fullName.split(" ")[0] : "");
+      const parentName = cleanCols[2] || (preferred ? `Orang Tua ${preferred}` : "");
+      const parentEmail = cleanCols[3] || "";
+      const parentPassword = cleanCols[4] || "Bismillah#123";
+      const parentPhone = cleanCols[5] || "";
+
+      let isValid = true;
+      let error = "";
+
+      if (!fullName) {
+        isValid = false;
+        error = "Nama siswa wajib diisi";
+      } else if (parentEmail && (!parentEmail.includes("@") || !parentEmail.includes("."))) {
+        isValid = false;
+        error = "Format email orang tua tidak valid";
+      } else if (parentPassword && parentPassword.length < 6) {
+        isValid = false;
+        error = "Sandi minimal 6 karakter";
+      }
+
+      results.push({
+        full_name: fullName,
+        preferred_name: preferred,
+        parent_name: parentName,
+        parent_email: parentEmail,
+        parent_password: parentPassword,
+        parent_phone: parentPhone,
+        isValid,
+        error,
+      });
+    }
+
+    return results;
+  }, [rawText]);
+
+  const validCount = parsedRows.filter((r) => r.isValid).length;
+
+  if (!isOpen) return null;
+
+  const targetClass = classes.find((c) => c.id === selectedClassId) || classes[0];
+
+  const handleDownloadTemplate = () => {
+    const csvContent =
+      "Nama Lengkap Siswa,Nama Panggilan,Nama Wali Murid,Email Login Ortu,Kata Sandi Awal,Nomor WhatsApp\n" +
+      "Ahmad Faris Pratama,Faris,Bapak Herman Pratama,herman.wali@gmail.com,Bismillah#123,081234567890\n" +
+      "Fatimah Azzahra,Zahra,Ibu Siti Nurhaliza,siti.wali@gmail.com,Bismillah#123,081298765432\n" +
+      "Muhammad Rayhan,Rayhan,Bapak Bambang,bambang.wali@gmail.com,Bismillah#123,081345678901\n";
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "template_pendaftaran_masal_sahabat_ibadah.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleLoadSample = () => {
+    const sample =
+      "Ahmad Faris Pratama\tFaris\tBapak Herman Pratama\therman.wali@gmail.com\tBismillah#123\t081234567890\n" +
+      "Fatimah Azzahra\tZahra\tIbu Siti Nurhaliza\tsiti.wali@gmail.com\tBismillah#123\t081298765432\n" +
+      "Muhammad Rayhan\tRayhan\tBapak Bambang\tbambang.wali@gmail.com\tBismillah#123\t081345678901\n" +
+      "Aisyah Humaira\tAisyah\tIbu Ratna Dewi\tratna.wali@gmail.com\tBismillah#123\t081212345678";
+    setRawText(sample);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      setRawText(text);
+      setInputMode("paste");
+    };
+    reader.readAsText(file);
+  };
+
+  const handleSubmit = async () => {
+    const validStudents = parsedRows.filter((r) => r.isValid);
+    if (validStudents.length === 0) {
+      alert("Tidak ada baris siswa yang valid untuk didaftarkan.");
+      return;
+    }
+    if (!selectedClassId) {
+      alert("Silakan pilih kelas tujuan terlebih dahulu.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const payload = validStudents.map((s) => ({
+        full_name: s.full_name,
+        preferred_name: s.preferred_name,
+        parent_name: s.parent_name,
+        parent_email: s.parent_email || undefined,
+        parent_password: s.parent_password,
+        parent_phone: s.parent_phone || undefined,
+      }));
+
+      const res = await api.teacher.bulkCreateStudents(selectedClassId, payload);
+      showToast(res.message || `Berhasil mendaftarkan ${res.count} siswa secara masal!`);
+      setResultData({
+        count: res.count,
+        students: payload,
+      });
+      onSuccess();
+    } catch (err: any) {
+      alert("Gagal melakukan pendaftaran masal: " + err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(10, 34, 29, 0.78)", display: "grid", placeItems: "center", padding: 16 }}>
+      <div className="panel" style={{ width: "100%", maxWidth: 840, maxHeight: "92vh", overflowY: "auto", padding: 24, background: "#fff", borderRadius: 18, border: "1px solid #cbe3dc", boxShadow: "0 20px 45px rgba(10,48,40,.22)" }}>
+        {resultData ? (
+          <div>
+            <div style={{ textAlign: "center", padding: "16px 0 24px" }}>
+              <div style={{ width: 52, height: 52, borderRadius: "50%", background: "#e8f7f2", color: "#166534", display: "grid", placeItems: "center", margin: "0 auto 12px" }}>
+                <CheckCircle2 size={30} />
+              </div>
+              <h2 style={{ fontSize: 18, color: "#14532d", margin: "0 0 6px" }}>Pendaftaran Masal Berhasil!</h2>
+              <p style={{ fontSize: 12, color: "#597c74", margin: 0 }}>
+                Sebanyak <b>{resultData.count} siswa</b> beserta akun orang tua telah berhasil didaftarkan ke <b>{targetClass?.name}</b>.
+              </p>
+            </div>
+
+            <div style={{ background: "#f8fbf9", border: "1px solid #e1ede8", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#164e43", marginBottom: 10 }}>Daftar Kredensial Login Orang Tua:</div>
+              <div style={{ maxHeight: 220, overflowY: "auto", borderRadius: 8, border: "1px solid #e1eee9", background: "#fff" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                  <thead>
+                    <tr style={{ background: "#f0f8f5", textAlign: "left", color: "#185347" }}>
+                      <th style={{ padding: "8px 12px" }}>Siswa</th>
+                      <th style={{ padding: "8px 12px" }}>Wali Murid</th>
+                      <th style={{ padding: "8px 12px" }}>Email Login</th>
+                      <th style={{ padding: "8px 12px" }}>Kata Sandi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resultData.students.map((st, idx) => (
+                      <tr key={idx} style={{ borderTop: "1px solid #edf4f1" }}>
+                        <td style={{ padding: "8px 12px", fontWeight: 700, color: "#174e46" }}>{st.full_name}</td>
+                        <td style={{ padding: "8px 12px", color: "#597c74" }}>{st.parent_name}</td>
+                        <td style={{ padding: "8px 12px", fontFamily: "monospace", color: "#0c9d80" }}>{st.parent_email || "—"}</td>
+                        <td style={{ padding: "8px 12px", fontFamily: "monospace", color: "#0c9d80" }}>{st.parent_password || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => {
+                    const lines = resultData.students.map((st) =>
+                      `Siswa: ${st.full_name} | Wali: ${st.parent_name} | Email: ${st.parent_email || "-"} | Sandi: ${st.parent_password || "-"}`
+                    );
+                    navigator.clipboard.writeText(lines.join("\n"));
+                    showToast("Seluruh kredensial berhasil disalin ke clipboard!");
+                  }}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11 }}
+                >
+                  <Copy size={14} /> Salin Kredensial Semua Siswa
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => {
+                    const lines = [
+                      "DAFTAR AKUN LOGIN ORANG TUA SISWA - SAHABAT IBADAH",
+                      `Kelas: ${targetClass?.name || ""}`,
+                      `Tanggal: ${formatDateIndo(getTodayStr())}`,
+                      "=====================================================",
+                      ...resultData.students.map((st, idx) =>
+                        `${idx + 1}. Siswa: ${st.full_name}\n   Nama Wali: ${st.parent_name}\n   Email: ${st.parent_email || "-"}\n   Kata Sandi: ${st.parent_password || "-"}\n`
+                      ),
+                    ];
+                    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8;" });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = `kredensial_ortu_${targetClass?.name?.toLowerCase().replace(/\s+/g, "_") || "kelas"}.txt`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                  }}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11 }}
+                >
+                  <Download size={14} /> Unduh File (.txt)
+                </button>
+              </div>
+
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => {
+                  setResultData(null);
+                  setRawText("");
+                  onClose();
+                }}
+              >
+                Selesai
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            {/* Header Modal */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: "#e8f7f2", color: "#166534", display: "grid", placeItems: "center" }}>
+                  <Users size={20} />
+                </div>
+                <div>
+                  <strong style={{ fontSize: 16, color: "#174e46", display: "block" }}>Pendaftaran Siswa & Orang Tua Masal</strong>
+                  <span style={{ fontSize: 11, color: "#618b80" }}>Impor data puluhan siswa sekaligus dari Excel / CSV</span>
+                </div>
+              </div>
+              <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#618b80" }}><X size={20} /></button>
+            </div>
+
+            {/* Pilihan Kelas Tujuan */}
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, background: "#f8faf9", padding: "10px 14px", borderRadius: 10, border: "1px solid #e1ede8" }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#164e43", whiteSpace: "nowrap" }}>
+                Kelas Tujuan Impor:
+              </label>
+              <select
+                value={selectedClassId}
+                onChange={(e) => setSelectedClassId(e.target.value)}
+                style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #cbe3dc", fontSize: 12, fontWeight: 700, color: "#164e43", background: "#fff", flex: 1 }}
+              >
+                {classes.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.student_count || 0} siswa saat ini)</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Navigasi Tab Mode: Tempel vs Upload */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setInputMode("paste")}
+                  style={{
+                    padding: "7px 14px",
+                    borderRadius: 8,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    border: inputMode === "paste" ? "1.5px solid #0c9d80" : "1px solid #d4ebe5",
+                    background: inputMode === "paste" ? "#0c9d80" : "#fff",
+                    color: inputMode === "paste" ? "#fff" : "#185347",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  <FileSpreadsheet size={14} /> Salin-Tempel dari Excel / Sheets
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInputMode("upload")}
+                  style={{
+                    padding: "7px 14px",
+                    borderRadius: 8,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    border: inputMode === "upload" ? "1.5px solid #0c9d80" : "1px solid #d4ebe5",
+                    background: inputMode === "upload" ? "#0c9d80" : "#fff",
+                    color: inputMode === "upload" ? "#fff" : "#185347",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  <Upload size={14} /> Unggah File CSV
+                </button>
+              </div>
+
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={handleLoadSample}
+                  className="ghost-button"
+                  style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, background: "#f0f8f5", color: "#166534" }}
+                >
+                  📋 Muat Contoh Format
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadTemplate}
+                  className="ghost-button"
+                  style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, background: "#fffbeb", color: "#92400e" }}
+                >
+                  📥 Unduh Template CSV
+                </button>
+              </div>
+            </div>
+
+            {/* Input Mode: Paste */}
+            {inputMode === "paste" ? (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: "#618b80", marginBottom: 6 }}>
+                  Urutan Kolom: <b>Nama Siswa [Tab] Nama Panggilan [Tab] Nama Wali [Tab] Email Login [Tab] Sandi [Tab] No WhatsApp</b>
+                </div>
+                <textarea
+                  rows={6}
+                  value={rawText}
+                  onChange={(e) => setRawText(e.target.value)}
+                  placeholder={`Contoh baris yang ditempel:\nAhmad Faris Pratama\tFaris\tBapak Herman\therman.wali@gmail.com\tBismillah#123\t081234567890\nFatimah Azzahra\tZahra\tIbu Siti\tsiti.wali@gmail.com\tBismillah#123\t081298765432`}
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #cbe3dc", fontSize: 11, fontFamily: "monospace", resize: "vertical" }}
+                />
+              </div>
+            ) : (
+              <div style={{ marginBottom: 16, padding: "24px 16px", background: "#f8faf9", borderRadius: 12, border: "2px dashed #b2ded1", textAlign: "center" }}>
+                <Upload size={28} style={{ color: "#0c9d80", marginBottom: 8 }} />
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#164e43", marginBottom: 4 }}>Pilih Berkas CSV dari Komputer</div>
+                <div style={{ fontSize: 11, color: "#7a9c94", marginBottom: 12 }}>Berkas .csv sesuai template Sahabat Ibadah</div>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, background: "#0c9d80", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                  <span>Pilih Berkas CSV</span>
+                  <input type="file" accept=".csv,.txt" onChange={handleFileUpload} style={{ display: "none" }} />
+                </label>
+              </div>
+            )}
+
+            {/* Preview Tabel Parsed */}
+            {parsedRows.length > 0 && (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <strong style={{ fontSize: 12, color: "#164e43" }}>Pratinjau Data ({parsedRows.length} baris terdeteksi):</strong>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#0c9d80", background: "#e8f7f2", padding: "3px 8px", borderRadius: 6 }}>
+                    ✓ {validCount} baris valid siap diimpor
+                  </span>
+                </div>
+
+                <div style={{ maxHeight: 220, overflowY: "auto", borderRadius: 8, border: "1px solid #e1eee9", background: "#fff" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                    <thead>
+                      <tr style={{ background: "#f0f8f5", textAlign: "left", color: "#185347" }}>
+                        <th style={{ padding: "6px 10px" }}>No</th>
+                        <th style={{ padding: "6px 10px" }}>Nama Siswa</th>
+                        <th style={{ padding: "6px 10px" }}>Panggilan</th>
+                        <th style={{ padding: "6px 10px" }}>Wali Murid</th>
+                        <th style={{ padding: "6px 10px" }}>Email Ortu</th>
+                        <th style={{ padding: "6px 10px" }}>Kata Sandi</th>
+                        <th style={{ padding: "6px 10px" }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parsedRows.map((r, idx) => (
+                        <tr key={idx} style={{ borderTop: "1px solid #edf4f1", background: r.isValid ? "#fff" : "#fff5f5" }}>
+                          <td style={{ padding: "6px 10px", color: "#7a9b94" }}>{idx + 1}</td>
+                          <td style={{ padding: "6px 10px", fontWeight: 700, color: "#174e46" }}>{r.full_name}</td>
+                          <td style={{ padding: "6px 10px", color: "#597c74" }}>{r.preferred_name}</td>
+                          <td style={{ padding: "6px 10px", color: "#597c74" }}>{r.parent_name}</td>
+                          <td style={{ padding: "6px 10px", fontFamily: "monospace", color: r.parent_email ? "#0c9d80" : "#9ca3af" }}>
+                            {r.parent_email || "(belum ada)"}
+                          </td>
+                          <td style={{ padding: "6px 10px", fontFamily: "monospace", color: "#0c9d80" }}>{r.parent_password}</td>
+                          <td style={{ padding: "6px 10px" }}>
+                            {r.isValid ? (
+                              <span style={{ color: "#0c9d80", fontWeight: 700 }}>✓ Siap</span>
+                            ) : (
+                              <span style={{ color: "#dc2626", fontSize: 10 }}>⚠️ {r.error}</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Footer Buttons */}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 12, paddingTop: 12, borderTop: "1px solid #edf4f1" }}>
+              <button type="button" className="ghost-button" onClick={onClose}>
+                Batal
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={submitting || validCount === 0}
+                onClick={handleSubmit}
+              >
+                {submitting ? "Memproses Impor..." : `Daftarkan ${validCount} Siswa ke ${targetClass?.name}`}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// TAB MANAJEMEN BUTIR IBADAH & KEBIASAAN GURU
+// =============================================================================
+
+function TeacherHabitsView({
+  showToast,
+}: {
+  showToast: (msg: string) => void;
+}) {
+  const [habits, setHabits] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [modalForm, setModalForm] = useState<{
+    isOpen: boolean;
+    mode: "add" | "edit";
+    data?: any;
+  } | null>(null);
+  const [modalDelete, setModalDelete] = useState<any | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    loadHabits();
+  }, []);
+
+  const loadHabits = async () => {
+    setLoading(true);
+    try {
+      const res = await api.teacher.getHabits();
+      if (res.habits) {
+        setHabits(res.habits);
+      }
+    } catch (err: any) {
+      console.error("Gagal memuat butir kebiasaan:", err);
+      showToast("Gagal memuat butir ibadah: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const habitIconOptions = [
+    { key: "Sun", label: "Matahari / Pagi", icon: Sun },
+    { key: "Moon", label: "Bulan / Malam", icon: Moon },
+    { key: "BookOpen", label: "Buku / Tilawah", icon: BookOpen },
+    { key: "Heart", label: "Hati / Kebaikan", icon: Heart },
+    { key: "Star", label: "Bintang / Prestasi", icon: Star },
+    { key: "Sparkles", label: "Kilau / Berkah", icon: Sparkles },
+    { key: "Award", label: "Piala / Target", icon: Award },
+    { key: "ShieldCheck", label: "Disiplin / Ibadah", icon: ShieldCheck },
+    { key: "Clock", label: "Jam / Tepat Waktu", icon: Clock },
+    { key: "Smile", label: "Senyum / Ramah", icon: Smile },
+    { key: "Compass", label: "Kompas / Arah", icon: Compass },
+    { key: "Leaf", label: "Daun / Peduli", icon: Leaf },
+    { key: "ClipboardCheck", label: "Centang", icon: ClipboardCheck },
+  ];
+
+  const handleSaveHabit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!modalForm) return;
+
+    setSaving(true);
+    try {
+      if (modalForm.mode === "add") {
+        await api.teacher.createHabit({
+          name: modalForm.data.name,
+          category: modalForm.data.category,
+          description: modalForm.data.description,
+          icon_key: modalForm.data.icon_key,
+          sort_order: Number(modalForm.data.sort_order) || 10,
+        });
+        showToast(`Butir ibadah "${modalForm.data.name}" berhasil ditambahkan!`);
+      } else {
+        await api.teacher.updateHabit(modalForm.data.id, {
+          name: modalForm.data.name,
+          category: modalForm.data.category,
+          description: modalForm.data.description,
+          icon_key: modalForm.data.icon_key,
+          sort_order: Number(modalForm.data.sort_order) || 10,
+        });
+        showToast(`Butir ibadah "${modalForm.data.name}" berhasil diperbarui!`);
+      }
+      setModalForm(null);
+      loadHabits();
+    } catch (err: any) {
+      showToast("Gagal menyimpan butir ibadah: " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteHabit = async () => {
+    if (!modalDelete) return;
+    setSaving(true);
+    try {
+      await api.teacher.deleteHabit(modalDelete.id);
+      showToast(`Butir ibadah "${modalDelete.name}" berhasil diarsipkan.`);
+      setModalDelete(null);
+      loadHabits();
+    } catch (err: any) {
+      showToast("Gagal mengarsipkan: " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Kategori kelompok
+  const categoryGroups = [
+    {
+      key: "ibadah_wajib",
+      title: "Ibadah Wajib (Shalat 5 Waktu & Fardhu)",
+      badge: "Wajib",
+      badgeColor: "#d97706",
+      bgBadge: "#fef3c7",
+    },
+    {
+      key: "ibadah_harian",
+      title: "Ibadah Harian & Sunnah (Dhuha, Tilawah, Dzikir)",
+      badge: "Sunnah",
+      badgeColor: "#059669",
+      bgBadge: "#d1fae5",
+    },
+    {
+      key: "kebiasaan_baik",
+      title: "Kebiasaan Baik & Karakter Akhlakul Karimah",
+      badge: "Karakter",
+      badgeColor: "#2563eb",
+      bgBadge: "#dbeafe",
+    },
+  ];
+
+  return (
+    <div className="page-stack">
+      <div className="page-intro">
+        <div>
+          <div className="section-kicker">Kurikulum & Indikator Mutaba'ah</div>
+          <h1>Manajemen Butir Checklist Ibadah</h1>
+          <p>
+            Kelola daftar amalan yang dipantau setiap hari. Perubahan butir otomatis tersinkronisasi ke checklist siswa, grafik progres, dan rapor mingguan.
+          </p>
+        </div>
+        <button
+          className="primary-button"
+          onClick={() =>
+            setModalForm({
+              isOpen: true,
+              mode: "add",
+              data: {
+                name: "",
+                category: "ibadah_wajib",
+                description: "",
+                icon_key: "Sun",
+                sort_order: (habits.length + 1) * 10,
+              },
+            })
+          }
+        >
+          <Plus size={16} /> Tambah Butir Ibadah Baru
+        </button>
+      </div>
+
+      {/* Info Banner Sinkronisasi */}
+      <div
+        style={{
+          background: "#f0fdf4",
+          border: "1px solid #bbf7d0",
+          borderRadius: 12,
+          padding: "12px 16px",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
+        <div style={{ width: 32, height: 32, borderRadius: 8, background: "#dcfce7", color: "#15803d", display: "grid", placeItems: "center", flexShrink: 0 }}>
+          <Sparkles size={18} />
+        </div>
+        <div style={{ fontSize: 12, color: "#166534" }}>
+          <b>Sinkronisasi Dinamis Aktif:</b> Setiap butir yang Anda buat atau ubah di sini akan langsung tampil pada panel orang tua seluruh murid dan otomatis dihitung dalam rumus kepatuhan mutaba'ah (0–100%) serta rapor PDF & Word.
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: "center", padding: 40, color: "#7a9c94" }}>
+          <RefreshCw size={24} className="spin" style={{ margin: "0 auto 8px" }} />
+          <div>Memuat butir ibadah...</div>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 20 }}>
+          {categoryGroups.map((grp) => {
+            const groupHabits = habits.filter(
+              (h) => h.category === grp.key || (grp.key === "ibadah_wajib" && h.category === "fajr")
+            );
+
+            return (
+              <section key={grp.key} className="panel" style={{ padding: 20 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span
+                      style={{
+                        padding: "3px 8px",
+                        borderRadius: 6,
+                        fontSize: 10,
+                        fontWeight: 800,
+                        textTransform: "uppercase",
+                        background: grp.bgBadge,
+                        color: grp.badgeColor,
+                      }}
+                    >
+                      {grp.badge}
+                    </span>
+                    <h2 style={{ fontSize: 14, color: "#164e43", margin: 0 }}>{grp.title}</h2>
+                  </div>
+                  <span style={{ fontSize: 11, color: "#7a9b94" }}>{groupHabits.length} butir aktif</span>
+                </div>
+
+                {groupHabits.length === 0 ? (
+                  <div style={{ padding: "16px", textAlign: "center", color: "#9ca3af", fontSize: 11, background: "#f9fafb", borderRadius: 8 }}>
+                    Belum ada butir ibadah pada kategori ini.
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {groupHabits.map((item) => {
+                      const IconComp = iconMap[item.icon_key] || Sparkles;
+                      return (
+                        <div
+                          key={item.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "10px 14px",
+                            background: "#fdfefe",
+                            borderRadius: 10,
+                            border: "1px solid #e1eee9",
+                            flexWrap: "wrap",
+                            gap: 10,
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                            <div
+                              style={{
+                                width: 34,
+                                height: 34,
+                                borderRadius: 8,
+                                background: "#f0f8f5",
+                                color: "#0c9d80",
+                                display: "grid",
+                                placeItems: "center",
+                                flexShrink: 0,
+                              }}
+                            >
+                              <IconComp size={18} />
+                            </div>
+                            <div>
+                              <strong style={{ fontSize: 13, color: "#164e43", display: "block" }}>{item.name}</strong>
+                              {item.description && (
+                                <span style={{ fontSize: 10, color: "#7a9c94", display: "block" }}>{item.description}</span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <span style={{ fontSize: 10, color: "#618b80", background: "#edf6f3", padding: "3px 8px", borderRadius: 6, fontWeight: 700 }}>
+                              Urutan: #{item.sort_order}
+                            </span>
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={() =>
+                                setModalForm({
+                                  isOpen: true,
+                                  mode: "edit",
+                                  data: {
+                                    id: item.id,
+                                    name: item.name,
+                                    category: item.category,
+                                    description: item.description || "",
+                                    icon_key: item.icon_key || "Sun",
+                                    sort_order: item.sort_order,
+                                  },
+                                })
+                              }
+                              style={{ padding: "5px 8px", borderRadius: 6, color: "#0c9d80" }}
+                              title="Ubah Butir Ibadah"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost-button"
+                              onClick={() => setModalDelete(item)}
+                              style={{ padding: "5px 8px", borderRadius: 6, color: "#dc2626" }}
+                              title="Arsipkan Butir Ibadah"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      )}
+
+      {/* MODAL TAMBAH / EDIT BUTIR IBADAH */}
+      {modalForm && modalForm.isOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(10, 34, 29, 0.78)", display: "grid", placeItems: "center", padding: 16 }}>
+          <div className="panel" style={{ width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto", padding: 24, background: "#fff", borderRadius: 18, border: "1px solid #cbe3dc", boxShadow: "0 20px 45px rgba(10,48,40,.22)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 8, background: "#e8f7f2", color: "#166534", display: "grid", placeItems: "center" }}>
+                  <Sparkles size={18} />
+                </div>
+                <div>
+                  <strong style={{ fontSize: 15, color: "#174e46" }}>
+                    {modalForm.mode === "add" ? "Tambah Butir Ibadah Baru" : "Edit Butir Ibadah"}
+                  </strong>
+                  <div style={{ fontSize: 10, color: "#618b80" }}>Atur indikator mutaba'ah untuk seluruh siswa</div>
+                </div>
+              </div>
+              <button onClick={() => setModalForm(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#618b80" }}><X size={18} /></button>
+            </div>
+
+            <form onSubmit={handleSaveHabit} style={{ display: "grid", gap: 14 }}>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#365c55" }}>
+                Nama Butir Ibadah / Kebiasaan
+                <input
+                  type="text"
+                  value={modalForm.data.name}
+                  onChange={(e) => setModalForm({ ...modalForm, data: { ...modalForm.data, name: e.target.value } })}
+                  placeholder="Contoh: Shalat Dhuha (Minimal 2 Rakaat)"
+                  required
+                  style={{ width: "100%", padding: "10px", borderRadius: 8, border: "1px solid #cbe3dc", marginTop: 4, fontSize: 12 }}
+                />
+              </label>
+
+              <div className="form-grid-2col">
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#365c55" }}>
+                  Kategori
+                  <select
+                    value={modalForm.data.category}
+                    onChange={(e) => setModalForm({ ...modalForm, data: { ...modalForm.data, category: e.target.value } })}
+                    style={{ width: "100%", padding: "10px", borderRadius: 8, border: "1px solid #cbe3dc", marginTop: 4, fontSize: 12, background: "#fff" }}
+                  >
+                    <option value="ibadah_wajib">Ibadah Wajib (Shalat 5 Waktu)</option>
+                    <option value="ibadah_harian">Ibadah Harian / Sunnah</option>
+                    <option value="kebiasaan_baik">Kebiasaan Baik & Karakter</option>
+                  </select>
+                </label>
+
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#365c55" }}>
+                  Urutan Tampil (Sort Order)
+                  <input
+                    type="number"
+                    value={modalForm.data.sort_order}
+                    onChange={(e) => setModalForm({ ...modalForm, data: { ...modalForm.data, sort_order: Number(e.target.value) } })}
+                    placeholder="Contoh: 10, 20, 30"
+                    required
+                    style={{ width: "100%", padding: "10px", borderRadius: 8, border: "1px solid #cbe3dc", marginTop: 4, fontSize: 12 }}
+                  />
+                </label>
+              </div>
+
+              {/* Pilihan Ikon */}
+              <div>
+                <span style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#365c55", marginBottom: 6 }}>
+                  Pilih Ikon Tampilan:
+                </span>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6 }}>
+                  {habitIconOptions.map((opt) => {
+                    const OptIcon = opt.icon;
+                    const isSel = modalForm.data.icon_key === opt.key;
+                    return (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setModalForm({ ...modalForm, data: { ...modalForm.data, icon_key: opt.key } })}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          gap: 4,
+                          padding: "8px 4px",
+                          borderRadius: 8,
+                          border: isSel ? "1.5px solid #0c9d80" : "1px solid #e1eee9",
+                          background: isSel ? "#e8f7f2" : "#fdfefe",
+                          color: isSel ? "#0c9d80" : "#597c74",
+                          cursor: "pointer",
+                          fontSize: 9,
+                          fontWeight: isSel ? 700 : 500,
+                        }}
+                      >
+                        <OptIcon size={16} />
+                        <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 64 }}>
+                          {opt.label.split("/")[0].trim()}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#365c55" }}>
+                Deskripsi / Petunjuk Singkat (Opsional)
+                <textarea
+                  rows={2}
+                  value={modalForm.data.description}
+                  onChange={(e) => setModalForm({ ...modalForm, data: { ...modalForm.data, description: e.target.value } })}
+                  placeholder="Contoh: Dikerjakan sebelum waktu Maghrib bersama orang tua."
+                  style={{ width: "100%", padding: "10px", borderRadius: 8, border: "1px solid #cbe3dc", marginTop: 4, fontSize: 12, resize: "vertical" }}
+                />
+              </label>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}>
+                <button type="button" className="ghost-button" onClick={() => setModalForm(null)}>
+                  Batal
+                </button>
+                <button type="submit" disabled={saving} className="primary-button">
+                  {saving ? "Menyimpan..." : "Simpan Butir Ibadah"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL KONFIRMASI HAPUS / ARSIP BUTIR IBADAH */}
+      {modalDelete && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(10, 34, 29, 0.78)", display: "grid", placeItems: "center", padding: 16 }}>
+          <div className="panel" style={{ width: "100%", maxWidth: 440, padding: 24, background: "#fff", borderRadius: 18, border: "1px solid #cbe3dc" }}>
+            <div style={{ textAlign: "center", padding: "10px 0 16px" }}>
+              <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#fee2e2", color: "#dc2626", display: "grid", placeItems: "center", margin: "0 auto 12px" }}>
+                <Trash2 size={24} />
+              </div>
+              <h2 style={{ fontSize: 16, color: "#991b1b", margin: "0 0 8px" }}>Arsipkan Butir Ibadah?</h2>
+              <p style={{ fontSize: 12, color: "#597c74", margin: 0, lineHeight: 1.5 }}>
+                Yakin ingin menonaktifkan <b>"{modalDelete.name}"</b>?<br />
+                Butir ini tidak akan tampil lagi di checklist harian siswa berikutnya, namun seluruh riwayat pengisian lampau tetap tersimpan aman di database.
+              </p>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button type="button" className="ghost-button" onClick={() => setModalDelete(null)}>
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={handleDeleteHabit}
+                style={{
+                  padding: "9px 16px",
+                  borderRadius: 8,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  background: "#dc2626",
+                  color: "#fff",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                {saving ? "Mengarsipkan..." : "Ya, Arsipkan Butir Ini"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2937,6 +4425,9 @@ function ParentSettingsView({
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCurrentPass, setShowCurrentPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
 
   const [savingProfile, setSavingProfile] = useState(false);
   const [changingPass, setChangingPass] = useState(false);
@@ -3130,40 +4621,80 @@ function ParentSettingsView({
           </div>
         )}
 
-        <form onSubmit={handleSubmitPassword} style={{ display: "grid", gap: 14 }}>
+        <form onSubmit={handleSubmitPassword} style={{ display: "grid", gap: 16 }}>
           <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#365c55" }}>
             Kata Sandi Lama / Saat Ini
-            <input
-              type="password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              required
-              style={{ width: "100%", padding: "10px", borderRadius: 8, border: "1px solid #cbe3dc", marginTop: 4, fontSize: 12 }}
-            />
+            <div style={{ position: "relative", marginTop: 4 }}>
+              <input
+                type={showCurrentPass ? "text" : "password"}
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder="Masukkan kata sandi lama Anda"
+                required
+                style={{ width: "100%", padding: "10px 40px 10px 10px", borderRadius: 8, border: "1px solid #cbe3dc", fontSize: 12 }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowCurrentPass(!showCurrentPass)}
+                style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#618b80" }}
+                title={showCurrentPass ? "Sembunyikan kata sandi" : "Lihat kata sandi"}
+              >
+                {showCurrentPass ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </label>
 
           <div className="form-grid-2col">
             <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#365c55" }}>
               Kata Sandi Baru
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="Minimal 6 karakter"
-                required
-                style={{ width: "100%", padding: "10px", borderRadius: 8, border: "1px solid #cbe3dc", marginTop: 4, fontSize: 12 }}
-              />
+              <div style={{ position: "relative", marginTop: 4 }}>
+                <input
+                  type={showNewPass ? "text" : "password"}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Minimal 6 karakter"
+                  required
+                  style={{ width: "100%", padding: "10px 40px 10px 10px", borderRadius: 8, border: "1px solid #cbe3dc", fontSize: 12 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPass(!showNewPass)}
+                  style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#618b80" }}
+                  title={showNewPass ? "Sembunyikan kata sandi" : "Lihat kata sandi"}
+                >
+                  {showNewPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              <span style={{ fontSize: 10, color: "#618b80", marginTop: 4, display: "block" }}>
+                Minimal 6 karakter, dianjurkan kombinasi huruf dan angka.
+              </span>
             </label>
 
             <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#365c55" }}>
               Konfirmasi Kata Sandi Baru
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-                style={{ width: "100%", padding: "10px", borderRadius: 8, border: "1px solid #cbe3dc", marginTop: 4, fontSize: 12 }}
-              />
+              <div style={{ position: "relative", marginTop: 4 }}>
+                <input
+                  type={showConfirmPass ? "text" : "password"}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Ulangi kata sandi baru"
+                  required
+                  style={{ width: "100%", padding: "10px 40px 10px 10px", borderRadius: 8, border: "1px solid #cbe3dc", fontSize: 12 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPass(!showConfirmPass)}
+                  style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#618b80" }}
+                  title={showConfirmPass ? "Sembunyikan kata sandi" : "Lihat kata sandi"}
+                >
+                  {showConfirmPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              {confirmPassword && (
+                <span style={{ fontSize: 10, color: newPassword === confirmPassword ? "#0c9d80" : "#dc2626", marginTop: 4, display: "block", fontWeight: 600 }}>
+                  {newPassword === confirmPassword ? "✓ Kata sandi baru cocok" : "✗ Konfirmasi belum cocok"}
+                </span>
+              )}
             </label>
           </div>
 
@@ -4166,6 +5697,7 @@ export default function Home() {
   const [parentNote, setParentNote] = useState("");
   const [teacherNote, setTeacherNote] = useState("");
   const [schoolInfo, setSchoolInfo] = useState<{ name: string; logoUrl: string | null } | null>(null);
+  const [selectedChecklistDate, setSelectedChecklistDate] = useState<string>(getTodayStr());
 
   // State Guru
   const [teacherProfile, setTeacherProfile] = useState<any>(null);
@@ -4180,6 +5712,7 @@ export default function Home() {
   const [modalAddClass, setModalAddClass] = useState(false);
   const [newClassName, setNewClassName] = useState("");
   const [modalAddStudent, setModalAddStudent] = useState(false);
+  const [modalBulkStudent, setModalBulkStudent] = useState(false);
   const [newStudentName, setNewStudentName] = useState("");
   const [newStudentPreferred, setNewStudentPreferred] = useState("");
   const [modalEditStudent, setModalEditStudent] = useState<any | null>(null);
@@ -4269,7 +5802,7 @@ export default function Home() {
         setActiveChild(child);
 
         // Ambil summary & checklist
-        const sum = await api.parent.getChildSummary(child.id);
+        const sum = await api.parent.getChildSummary(child.id, selectedChecklistDate);
         if (sum.school) {
           setSchoolInfo(sum.school);
         }
@@ -4308,7 +5841,7 @@ export default function Home() {
   const handleSelectChild = async (selected: any) => {
     setActiveChild(selected);
     try {
-      const sum = await api.parent.getChildSummary(selected.id);
+      const sum = await api.parent.getChildSummary(selected.id, selectedChecklistDate);
       if (sum.school) setSchoolInfo(sum.school);
       if (sum.child) {
         setActiveChild((prev: any) => ({
@@ -4338,6 +5871,33 @@ export default function Home() {
       }
     } catch (err) {
       console.error("Gagal mengganti anak:", err);
+    }
+  };
+
+  const loadChildChecklistForDate = async (childId: string, date: string) => {
+    try {
+      const sum = await api.parent.getChildSummary(childId, date);
+      if (sum.summary) {
+        setStreak(sum.streak?.currentStreak || 0);
+        setPoints(sum.points || 0);
+        if (sum.chartBars?.length) setChartBars(sum.chartBars);
+        setParentNote(sum.parentNote || "");
+        setTeacherNote(sum.teacherNote || "");
+
+        const formattedHabits: Habit[] = sum.items.map((it) => ({
+          id: it.id,
+          label: it.label,
+          category: it.category,
+          icon: iconMap[it.iconKey] || Sun,
+          color: categoryColorMap[it.id] || "teal",
+          checked: it.checked,
+          status: it.status,
+          version: it.version,
+        }));
+        setHabits(formattedHabits);
+      }
+    } catch (err) {
+      console.error("Gagal memuat checklist untuk tanggal:", date, err);
     }
   };
 
@@ -4424,6 +5984,7 @@ export default function Home() {
       const res = await api.parent.saveChecklistItem(activeChild.id, habitId, {
         status: nextStatus,
         clientVersion: current.version,
+        entryDate: selectedChecklistDate,
       });
       // Update version
       setHabits((prev) =>
@@ -4442,7 +6003,7 @@ export default function Home() {
     if (!activeChild) return;
     try {
       if (parentNote) {
-        await api.parent.saveParentNote(activeChild.id, parentNote);
+        await api.parent.saveParentNote(activeChild.id, parentNote, selectedChecklistDate);
       }
       showToast("Alhamdulillah! Seluruh checklist dan catatan tersimpan di database lokal.");
     } catch (err: any) {
@@ -4790,6 +6351,11 @@ export default function Home() {
               teacherNote={teacherNote}
               schoolInfo={schoolInfo}
               onNavigate={setActiveTab}
+              onGoToChecklistDate={(date) => {
+                setSelectedChecklistDate(date);
+                if (activeChild) loadChildChecklistForDate(activeChild.id, date);
+                setActiveTab("checklist");
+              }}
             />
           )}
 
@@ -4799,6 +6365,11 @@ export default function Home() {
               habits={habits}
               streak={streak}
               parentNote={parentNote}
+              selectedDate={selectedChecklistDate}
+              onSelectDate={(newDate) => {
+                setSelectedChecklistDate(newDate);
+                if (activeChild) loadChildChecklistForDate(activeChild.id, newDate);
+              }}
               onToggle={toggleHabit}
               onSave={saveChecklistAll}
               onNoteChange={setParentNote}
@@ -4870,6 +6441,7 @@ export default function Home() {
               onOpenAddStudent={() => setModalAddStudent(true)}
               onOpenEditStudent={(s) => setModalEditStudent(s)}
               onDeleteStudent={handleDeleteStudent}
+              onOpenBulkStudent={() => setModalBulkStudent(true)}
               onOpenParentAccount={(s) => {
                 const cleanFirstName = (s.preferred_name || s.full_name || "siswa")
                   .toLowerCase()
@@ -4893,6 +6465,13 @@ export default function Home() {
                 setSelectedChatStudentId(s.id);
                 setActiveTab("messages");
               }}
+            />
+          )}
+
+          {/* VIEW GURU: MANAJEMEN BUTIR IBADAH & KEBIASAAN */}
+          {role === "teacher" && activeTab === "habits" && (
+            <TeacherHabitsView
+              showToast={showToast}
             />
           )}
 
@@ -4927,7 +6506,7 @@ export default function Home() {
 
           {/* PLACEHOLDER TAB LAINNYA */}
           {((role === "parent" && !["overview", "checklist", "progress", "reports", "messages", "settings"].includes(activeTab)) ||
-            (role === "teacher" && !["overview", "progress", "reports", "messages", "settings"].includes(activeTab))) && (
+            (role === "teacher" && !["overview", "progress", "habits", "reports", "messages", "settings"].includes(activeTab))) && (
             <section className="empty-state panel">
               <div className="empty-icon"><HomeIcon size={30} /></div>
               <div className="section-kicker">Modul</div>
@@ -4940,6 +6519,19 @@ export default function Home() {
           )}
         </div>
       </main>
+
+      {/* MODAL PENDAFTARAN SISWA MASAL */}
+      <BulkStudentModal
+        isOpen={modalBulkStudent}
+        onClose={() => setModalBulkStudent(false)}
+        classes={teacherClasses}
+        activeClassId={activeClassId}
+        onSuccess={() => {
+          loadClassStudents(activeClassId);
+          loadTeacherData();
+        }}
+        showToast={showToast}
+      />
 
       {/* MODAL TAMBAH KELAS */}
       {modalAddClass && (
@@ -5008,6 +6600,18 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {/* MODAL PENDAFTARAN SISWA & ORANG TUA SECARA MASAL (IMPORT) */}
+      <BulkStudentModal
+        isOpen={modalBulkStudent}
+        onClose={() => setModalBulkStudent(false)}
+        classes={teacherClasses}
+        activeClassId={activeClassId}
+        onSuccess={() => {
+          if (activeClassId) loadClassStudents(activeClassId);
+        }}
+        showToast={showToast}
+      />
 
       {/* MODAL EDIT DATA DIRI & FOTO SISWA (FITUR 4) */}
       {modalEditStudent && (

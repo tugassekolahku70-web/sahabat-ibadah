@@ -376,6 +376,76 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ note }),
       }),
+
+    // Pendaftaran Siswa & Orang Tua Masal
+    bulkCreateStudents: (
+      classId: string,
+      students: Array<{
+        full_name: string;
+        preferred_name?: string;
+        grade_level?: string;
+        parent_name?: string;
+        parent_email?: string;
+        parent_phone?: string;
+        parent_password?: string;
+      }>
+    ) =>
+      request<{ success: boolean; message: string; count: number; students: any[] }>(
+        `/classes/${classId}/students/bulk`,
+        {
+          method: "POST",
+          body: JSON.stringify({ students }),
+        }
+      ),
+
+    // Manajemen Butir Kebiasaan & Ibadah
+    getHabits: () =>
+      request<{
+        success: boolean;
+        habits: Array<{
+          id: string;
+          name: string;
+          category: "ibadah_wajib" | "ibadah_harian" | "kebiasaan_baik";
+          description: string | null;
+          icon_key: string;
+          sort_order: number;
+          is_active: number;
+          created_at: string;
+          updated_at: string;
+        }>;
+      }>("/teacher/habits"),
+
+    createHabit: (data: {
+      name: string;
+      category: "ibadah_wajib" | "ibadah_harian" | "kebiasaan_baik";
+      description?: string;
+      icon_key?: string;
+      sort_order?: number;
+    }) =>
+      request<{ success: boolean; message: string; habit: any }>("/teacher/habits", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+
+    updateHabit: (
+      habitId: string,
+      data: {
+        name: string;
+        category?: "ibadah_wajib" | "ibadah_harian" | "kebiasaan_baik";
+        description?: string | null;
+        icon_key?: string;
+        sort_order?: number;
+      }
+    ) =>
+      request<{ success: boolean; message: string }>(`/teacher/habits/${habitId}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+
+    deleteHabit: (habitId: string) =>
+      request<{ success: boolean; message: string }>(`/teacher/habits/${habitId}`, {
+        method: "DELETE",
+      }),
   },
 
   // ===========================================================================

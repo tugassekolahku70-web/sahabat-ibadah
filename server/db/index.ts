@@ -8,9 +8,23 @@ import pg from "pg";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATA_DIR = path.resolve(__dirname, "..", "data");
+
+// Lokasi konsisten untuk database SQLite lokal dan skema SQL baik di dev (tsx) maupun build (dist/index.js)
+const cwd = process.cwd();
+const DATA_DIR = fs.existsSync(path.resolve(cwd, "server", "data"))
+  ? path.resolve(cwd, "server", "data")
+  : fs.existsSync(path.resolve(__dirname, "..", "server", "data"))
+    ? path.resolve(__dirname, "..", "server", "data")
+    : path.resolve(__dirname, "..", "data");
+
 const DB_PATH = path.resolve(DATA_DIR, "sahabat_ibadah.db");
-const SCHEMA_PATH = path.resolve(__dirname, "schema.sql");
+
+const SCHEMA_PATH = fs.existsSync(path.resolve(cwd, "server", "db", "schema.sql"))
+  ? path.resolve(cwd, "server", "db", "schema.sql")
+  : fs.existsSync(path.resolve(__dirname, "..", "server", "db", "schema.sql"))
+    ? path.resolve(__dirname, "..", "server", "db", "schema.sql")
+    : path.resolve(__dirname, "schema.sql");
+
 
 // Deteksi apakah menggunakan Supabase PostgreSQL atau SQLite Lokal
 export const isPostgres = Boolean(process.env.DATABASE_URL && process.env.DATABASE_URL.trim().length > 0);

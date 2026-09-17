@@ -961,4 +961,328 @@ router.post(
   }
 );
 
+/**
+ * 18. Pendaftaran Siswa & Orang Tua Masal (Bulk Import)
+ * POST /api/v1/classes/:classId/students/bulk
+ */
+router.post(
+  ["/classes/:classId/students/bulk", "/:classId/students/bulk", "/teacher/classes/:classId/students/bulk"],
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { classId } = req.params;
+      const { students } = req.body;
+
+      const hasOwnership = await checkTeacherClassOwnership(req.user!.id, classId);
+      if (!hasOwnership) {
+        throw new AppError("Akses ditolak ke kelas ini.", { status: 403 });
+      }
+
+      if (!Array.isArray(students) || students.length === 0) {
+        throw new AppError("Daftar siswa untuk pendaftaran masal wajib berupa array dan tidak boleh kosong.", { status: 400 });
+      }
+
+      const now = nowISO();
+      const createdStudents: Array<{ id: string; name: string; parentEmail?: string }> = [];
+
+      await transaction(async () => {
+        for (const item of students) {
+          const fullName = item.full_name && String(item.full_name).trim();
+          if (!fullName) continue;
+
+          const preferredName =
+            (item.preferred_name && String(item.preferred_name).trim()) ||
+            fullName.split(" ")[0];
+          const gradeLevel = item.grade_level || "Kelas 4 SD";
+          const studentId = `child-${generateUUID().slice(0, 8)}`;
+
+          // 1. Buat Child
+          await execute(
+            `INSERT INTO children (id, school_id, full_name, preferred_name, grade_level, status, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
+            [studentId, req.user!.schoolId, fullName, preferredName, gradeLevel, now, now]
+          );
+
+          // 2. Tautkan ke Kelas
+          await execute(
+            `INSERT INTO student_class_links (id, child_id, class_id, status, created_at)
+             VALUES (?, ?, ?, 'active', ?)`,
+            [`scl-${generateUUID().slice(0, 8)}`, studentId, classId, now]
+          );
+
+          // 3. Daftarkan / Tautkan Akun Orang Tua jika email diisi
+          const parentEmail = item.parent_email && String(item.parent_email).trim().toLowerCase();
+          if (parentEmail) {
+            const parentName = item.parent_name ? String(item.parent_name).trim() : `Orang Tua ${preferredName}`;
+            const parentPhone = item.parent_phone ? String(item.parent_phone).trim() : null;
+            const passToUse = item.parent_password || "Bismillah#123";
+            const pHash = hashPassword(passToUse);
+
+            let parentUser = await queryOne<{ id: string }>(
+              `SELECT id FROM users WHERE email = ?`,
+              [parentEmail]
+            );
+
+            let parentUserId = parentUser?.id;
+            if (!parentUserId) {
+              parentUserId = `user-prn-${generateUUID().slice(0, 8)}`;
+              await execute(
+                `INSERT INTO users (id, email, phone, password_hash, full_name, status, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
+                [parentUserId, parentEmail, parentPhone, pHash, parentName, now, now]
+              );
+              await execute(
+                `INSERT INTO user_roles (id, user_id, school_id, role, created_at)
+                 VALUES (?, ?, ?, 'parent', ?)
+                 ON CONFLICT DO NOTHING`,
+                [`role-${generateUUID().slice(0, 8)}`, parentUserId, req.user!.schoolId, now]
+              );
+            }
+
+            await execute(
+              `INSERT INTO parent_child_links (id, parent_user_id, child_id, relationship, created_at)
+               VALUES (?, ?, ?, 'parent', ?)
+               ON CONFLICT DO NOTHING`,
+              [`pcl-${generateUUID().slice(0, 8)}`, parentUserId, studentId, now]
+            );
+          }
+
+          createdStudents.push({
+            id: studentId,
+            name: fullName,
+            parentEmail: parentEmail || undefined,
+          });
+        }
+      });
+
+      await logAudit({
+        schoolId: req.user!.schoolId,
+        actorUserId: req.user!.id,
+        action: "student.bulk_created",
+        entityType: "class",
+        entityId: classId,
+        after: { count: createdStudents.length },
+        ip: req.ip,
+      });
+
+      res.status(201).json({
+        success: true,
+        message: `Berhasil mendaftarkan ${createdStudents.length} siswa beserta akun orang tua secara masal.`,
+        count: createdStudents.length,
+        students: createdStudents,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * 19. Ambil Daftar Butir Kebiasaan & Ibadah Sekolah Guru
+ * GET /api/v1/teacher/habits
+ */
+router.get(["/habits", "/teacher/habits"], async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const habits = await queryAll<{
+      id: string;
+      name: string;
+      category: "ibadah_wajib" | "ibadah_harian" | "kebiasaan_baik";
+      description: string | null;
+      icon_key: string;
+      sort_order: number;
+      is_active: number;
+      created_at: string;
+      updated_at: string;
+    }>(
+      `SELECT id, name, category, description, icon_key, sort_order, is_active, created_at, updated_at
+       FROM habit_template_items
+       WHERE school_id = ? AND is_active = 1
+       ORDER BY sort_order ASC, created_at ASC`,
+      [req.user!.schoolId]
+    );
+
+    res.json({ success: true, habits });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * 20. Tambah Butir Kebiasaan & Ibadah Baru
+ * POST /api/v1/teacher/habits
+ */
+router.post(["/habits", "/teacher/habits"], async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { name, category, description, icon_key, sort_order } = req.body;
+
+    if (!name || !String(name).trim()) {
+      throw new AppError("Nama aktivitas ibadah wajib diisi.", { status: 400 });
+    }
+
+    const allowedCats = ["ibadah_wajib", "ibadah_harian", "kebiasaan_baik"];
+    const cat = allowedCats.includes(category) ? category : "ibadah_harian";
+    const now = nowISO();
+
+    // Dapatkan template_id sekolah atau buat jika belum ada
+    let template = await queryOne<{ id: string }>(
+      `SELECT id FROM habit_templates WHERE school_id = ? LIMIT 1`,
+      [req.user!.schoolId]
+    );
+    let templateId = template?.id;
+    if (!templateId) {
+      templateId = `tmpl-${generateUUID().slice(0, 8)}`;
+      await execute(
+        `INSERT INTO habit_templates (id, school_id, name, description, is_default, created_at, updated_at)
+         VALUES (?, ?, 'Standar Ibadah', 'Kurikulum pembiasaan kebaikan siswa', 1, ?, ?)`,
+        [templateId, req.user!.schoolId, now, now]
+      );
+    }
+
+    const maxOrderRow = await queryOne<{ max_order: number }>(
+      `SELECT COALESCE(MAX(sort_order), 0) as max_order FROM habit_template_items WHERE school_id = ?`,
+      [req.user!.schoolId]
+    );
+    const sortOrder = Number.isInteger(sort_order) ? sort_order : (maxOrderRow?.max_order || 0) + 1;
+
+    const habitId = `hi-${generateUUID().slice(0, 8)}`;
+    await execute(
+      `INSERT INTO habit_template_items (id, school_id, template_id, category, name, description, icon_key, sort_order, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+      [
+        habitId,
+        req.user!.schoolId,
+        templateId,
+        cat,
+        String(name).trim(),
+        description ? String(description).trim() : null,
+        icon_key || "Sun",
+        sortOrder,
+        now,
+        now,
+      ]
+    );
+
+    await logAudit({
+      schoolId: req.user!.schoolId,
+      actorUserId: req.user!.id,
+      action: "habit.created",
+      entityType: "habit_template_item",
+      entityId: habitId,
+      after: { name, category: cat, icon_key },
+      ip: req.ip,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: `Aktivitas "${name}" berhasil ditambahkan.`,
+      habit: {
+        id: habitId,
+        name: String(name).trim(),
+        category: cat,
+        description: description ? String(description).trim() : null,
+        icon_key: icon_key || "Sun",
+        sort_order: sortOrder,
+        is_active: 1,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * 21. Edit Butir Kebiasaan & Ibadah
+ * PUT /api/v1/teacher/habits/:habitId
+ */
+router.put(["/habits/:habitId", "/teacher/habits/:habitId"], async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { habitId } = req.params;
+    const { name, category, description, icon_key, sort_order } = req.body;
+
+    const existing = await queryOne<{ id: string }>(
+      `SELECT id FROM habit_template_items WHERE id = ? AND school_id = ?`,
+      [habitId, req.user!.schoolId]
+    );
+    if (!existing) {
+      throw new AppError("Aktivitas ibadah tidak ditemukan atau Anda tidak memiliki akses.", { status: 404 });
+    }
+
+    if (!name || !String(name).trim()) {
+      throw new AppError("Nama aktivitas ibadah wajib diisi.", { status: 400 });
+    }
+
+    const allowedCats = ["ibadah_wajib", "ibadah_harian", "kebiasaan_baik"];
+    const cat = allowedCats.includes(category) ? category : "ibadah_harian";
+    const now = nowISO();
+
+    await execute(
+      `UPDATE habit_template_items
+       SET name = ?, category = ?, description = ?, icon_key = COALESCE(?, icon_key),
+           sort_order = COALESCE(?, sort_order), updated_at = ?
+       WHERE id = ? AND school_id = ?`,
+      [
+        String(name).trim(),
+        cat,
+        description !== undefined ? (description ? String(description).trim() : null) : null,
+        icon_key || null,
+        Number.isInteger(sort_order) ? sort_order : null,
+        now,
+        habitId,
+        req.user!.schoolId,
+      ]
+    );
+
+    await logAudit({
+      schoolId: req.user!.schoolId,
+      actorUserId: req.user!.id,
+      action: "habit.updated",
+      entityType: "habit_template_item",
+      entityId: habitId,
+      after: { name, category: cat, icon_key },
+      ip: req.ip,
+    });
+
+    res.json({ success: true, message: "Aktivitas berhasil diperbarui." });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * 22. Hapus / Nonaktifkan Butir Kebiasaan (Soft Delete)
+ * DELETE /api/v1/teacher/habits/:habitId
+ */
+router.delete(["/habits/:habitId", "/teacher/habits/:habitId"], async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { habitId } = req.params;
+    const existing = await queryOne<{ id: string; name: string }>(
+      `SELECT id, name FROM habit_template_items WHERE id = ? AND school_id = ?`,
+      [habitId, req.user!.schoolId]
+    );
+    if (!existing) {
+      throw new AppError("Aktivitas tidak ditemukan.", { status: 404 });
+    }
+
+    // Soft delete agar histori catatan masa lalu siswa tidak hilang
+    await execute(
+      `UPDATE habit_template_items SET is_active = 0, updated_at = ? WHERE id = ? AND school_id = ?`,
+      [nowISO(), habitId, req.user!.schoolId]
+    );
+
+    await logAudit({
+      schoolId: req.user!.schoolId,
+      actorUserId: req.user!.id,
+      action: "habit.deleted",
+      entityType: "habit_template_item",
+      entityId: habitId,
+      after: { name: existing.name },
+      ip: req.ip,
+    });
+
+    res.json({ success: true, message: `Aktivitas "${existing.name}" berhasil dinonaktifkan.` });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
+
