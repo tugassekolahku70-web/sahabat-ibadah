@@ -88,14 +88,31 @@ router.get(["/:childId/summary", "/children/:childId/summary"], async (req: Requ
     const { currentStreak, longestStreak } = await calculateAndSaveStreak(childId);
     const points = await getChildPoints(childId);
 
-    // Hitung performa 12 hari terakhir untuk bar chart di UI
+    // Hitung performa 12 hari terakhir untuk bar chart di UI dalam 1 kueri agregasi cepat
+    const d12 = new Date();
+    d12.setDate(d12.getDate() - 12);
+    const d12Str = d12.toISOString().split("T")[0];
+
+    const chartRows = await queryAll<{ entry_date: string; completed_count: number }>(
+      `SELECT entry_date, COUNT(*) as completed_count
+       FROM checklist_entries
+       WHERE child_id = ? AND entry_date >= ? AND status = 'completed'
+       GROUP BY entry_date`,
+      [childId, d12Str]
+    );
+    const chartMap = new Map<string, number>();
+    for (const r of chartRows) {
+      chartMap.set(r.entry_date, Number(r.completed_count));
+    }
+
+    const totalHabitsCount = summary.totalHabits > 0 ? summary.totalHabits : 1;
     const chartBars: number[] = [];
     for (let i = 11; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const dStr = d.toISOString().split("T")[0];
-      const p = await getChildDailyProgress(childId, dStr);
-      chartBars.push(p.summary.percentage);
+      const count = chartMap.get(dStr) || 0;
+      chartBars.push(Math.round((count / totalHabitsCount) * 100));
     }
 
     res.json({
@@ -337,6 +354,49 @@ router.put(["/profile", "/parent/profile"], async (req: Request, res: Response, 
 });
 
 /**
+ * 7b. Perbarui Foto Profil Anak oleh Orang Tua
+ * PUT /api/v1/children/:childId/avatar
+ */
+router.put(["/:childId/avatar", "/children/:childId/avatar", "/parent/children/:childId/avatar"], async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { childId } = req.params;
+    const { avatar_url } = req.body;
+
+    const hasAccess = await checkParentChildAccess(req.user!.id, childId);
+    if (!hasAccess) {
+      throw new AppError("Akses ditolak ke data anak ini.", { status: 403 });
+    }
+
+    const now = nowISO();
+    await execute(
+      `UPDATE children SET avatar_url = ?, updated_at = ? WHERE id = ?`,
+      [avatar_url !== undefined ? avatar_url : null, now, childId]
+    );
+
+    const child = await queryOne<{ school_id: string }>(`SELECT school_id FROM children WHERE id = ?`, [childId]);
+
+    await logAudit({
+      schoolId: child?.school_id || req.user!.schoolId || "",
+      actorUserId: req.user!.id,
+      action: "child.avatar_updated",
+      entityType: "child",
+      entityId: childId,
+      after: { avatar_url: avatar_url ? "[image_data]" : null },
+      ip: req.ip,
+    });
+
+    res.json({
+      success: true,
+      message: "Foto profil anak berhasil diperbarui.",
+      childId,
+      avatarUrl: avatar_url || null,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * 8. Ganti Kata Sandi Akun Orang Tua
  * PUT /api/v1/parent/change-password
  */
@@ -418,6 +478,32 @@ router.get(["/:childId/reports", "/children/:childId/reports"], async (req: Requ
       habitStatsMap.set(h.id, { id: h.id, name: h.name, category: h.category, completedCount: 0, totalPossible: daysCount });
     });
 
+    // Ambil data checklist anak dalam rentang daysCount sekaligus dalam 1 query batch
+    const dStart = new Date();
+    dStart.setDate(dStart.getDate() - (daysCount - 1));
+    const startDateStr = dStart.toISOString().split("T")[0];
+
+    const entries = await queryAll<{
+      entry_date: string;
+      habit_item_id: string;
+      status: string;
+    }>(
+      `SELECT entry_date, habit_item_id, status
+       FROM checklist_entries
+       WHERE child_id = ? AND entry_date >= ? AND status = 'completed'`,
+      [childId, startDateStr]
+    );
+
+    // Grouping checklist yang selesai per tanggal: Map<date, Set<habitId>>
+    const completedByDate = new Map<string, Set<string>>();
+    for (const e of entries) {
+      if (!completedByDate.has(e.entry_date)) {
+        completedByDate.set(e.entry_date, new Set<string>());
+      }
+      completedByDate.get(e.entry_date)!.add(e.habit_item_id);
+    }
+
+    const totalHabitsCount = habits.length;
     let totalCompleted = 0;
     let activeDays = 0;
 
@@ -427,23 +513,28 @@ router.get(["/:childId/reports", "/children/:childId/reports"], async (req: Requ
       const dStr = d.toISOString().split("T")[0];
       const dayLabel = dayNames[d.getDay()];
 
-      const { summary, items } = await getChildDailyProgress(childId, dStr);
-      totalCompleted += summary.completedCount;
-      if (summary.completedCount > 0) activeDays++;
+      const completedHabitsForDate = completedByDate.get(dStr);
+      const completedCount = completedHabitsForDate ? completedHabitsForDate.size : 0;
+      const percentage = totalHabitsCount > 0 ? Math.round((completedCount / totalHabitsCount) * 100) : 0;
 
-      items.forEach((it) => {
-        if (it.checked && habitStatsMap.has(it.id)) {
-          habitStatsMap.get(it.id)!.completedCount++;
-        }
-      });
+      totalCompleted += completedCount;
+      if (completedCount > 0) activeDays++;
+
+      if (completedHabitsForDate) {
+        completedHabitsForDate.forEach((hid) => {
+          if (habitStatsMap.has(hid)) {
+            habitStatsMap.get(hid)!.completedCount++;
+          }
+        });
+      }
 
       days.push({
         date: dStr,
         dayLabel,
-        percentage: summary.percentage,
-        completedCount: summary.completedCount,
-        totalHabits: summary.totalHabits,
-        status: summary.percentage >= 80 ? "complete" : summary.percentage > 0 ? "partial" : "unreported",
+        percentage,
+        completedCount,
+        totalHabits: totalHabitsCount,
+        status: percentage >= 80 ? "complete" : percentage > 0 ? "partial" : "unreported",
       });
     }
 

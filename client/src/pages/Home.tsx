@@ -314,6 +314,7 @@ function ParentOverview({
   onNavigate,
   onSelectChild,
   onGoToChecklistDate,
+  onSaveChildAvatar,
 }: {
   user: UserSession | null;
   child: any;
@@ -328,6 +329,7 @@ function ParentOverview({
   onNavigate: (tab: Tab) => void;
   onSelectChild?: (c: any) => void;
   onGoToChecklistDate?: (date: string) => void;
+  onSaveChildAvatar?: (childId: string, avatarUrl: string | null) => Promise<void>;
 }) {
   const percentage = habits.length > 0 ? Math.round((completedCount / habits.length) * 100) : 0;
   return (
@@ -410,7 +412,49 @@ function ParentOverview({
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#f4fbf8", padding: "6px 14px", borderRadius: 10, border: "1px solid #e1f2ec" }}>
-          <Avatar initials={child?.preferred_name?.slice(0, 2).toUpperCase() || "AN"} src={child?.avatar_url} tone="pink" size="normal" />
+          <div style={{ position: "relative" }}>
+            <Avatar initials={child?.preferred_name?.slice(0, 2).toUpperCase() || "AN"} src={child?.avatar_url} tone="pink" size="normal" />
+            {onSaveChildAvatar && child && (
+              <label
+                title="Ganti foto anak"
+                style={{
+                  position: "absolute",
+                  bottom: -2,
+                  right: -4,
+                  background: "#109f80",
+                  color: "#fff",
+                  borderRadius: "50%",
+                  width: 18,
+                  height: 18,
+                  display: "grid",
+                  placeItems: "center",
+                  cursor: "pointer",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                  border: "1.5px solid #fff",
+                }}
+              >
+                <Camera size={10} />
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    if (file.size > 2 * 1024 * 1024) {
+                      alert("Ukuran foto maksimal 2MB");
+                      return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = async () => {
+                      await onSaveChildAvatar(child.id, reader.result as string);
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                  style={{ display: "none" }}
+                />
+              </label>
+            )}
+          </div>
           <div>
             <span style={{ display: "block", fontSize: 9, color: "#7a9b94" }}>
               {childrenList && childrenList.length > 1 ? "Pilih Siswa / Anak" : "Siswa Terhubung"}
@@ -4412,11 +4456,13 @@ function ParentSettingsView({
   childrenList,
   onSaveProfile,
   onChangePassword,
+  onSaveChildAvatar,
 }: {
   user: UserSession | null;
   childrenList: any[];
   onSaveProfile: (data: { full_name: string; phone?: string; avatar_url?: string | null }) => Promise<void>;
   onChangePassword: (data: { current_password: string; new_password: string }) => Promise<void>;
+  onSaveChildAvatar?: (childId: string, avatarUrl: string | null) => Promise<void>;
 }) {
   const [fullName, setFullName] = useState(user?.fullName || "");
   const [phone, setPhone] = useState("");
@@ -4592,15 +4638,57 @@ function ParentSettingsView({
 
       {/* 2. Daftar Siswa Terdaftar pada Akun Ini */}
       <section className="panel" style={{ padding: 24, marginBottom: 16 }}>
-        <h2 style={{ fontSize: 15, color: "#164e43", marginBottom: 14 }}>Anak Terdaftar ({childrenList.length})</h2>
-        <div style={{ display: "grid", gap: 10 }}>
+        <h2 style={{ fontSize: 15, color: "#164e43", marginBottom: 6 }}>Anak Terdaftar ({childrenList.length})</h2>
+        <p style={{ fontSize: 11, color: "#7a9c94", marginBottom: 16 }}>
+          Orang tua dapat memperbarui atau mengganti foto profil anak masing-masing di bawah ini.
+        </p>
+        <div style={{ display: "grid", gap: 12 }}>
           {childrenList.map((c) => (
-            <div key={c.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", background: "#f8fcfb", borderRadius: 10, border: "1px solid #e1eee9", flexWrap: "wrap", gap: 10 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <Avatar src={c.avatar_url} initials={c.preferred_name?.slice(0, 2).toUpperCase() || "AN"} size="normal" tone="pink" />
+            <div key={c.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", background: "#f8fcfb", borderRadius: 12, border: "1px solid #e1eee9", flexWrap: "wrap", gap: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                <Avatar src={c.avatar_url} initials={c.preferred_name?.slice(0, 2).toUpperCase() || "AN"} size="large" tone="pink" />
                 <div>
                   <strong style={{ display: "block", fontSize: 13, color: "#185347" }}>{c.full_name}</strong>
                   <span style={{ fontSize: 10, color: "#7a9c94" }}>{c.class_name || c.grade_level || "Kelas Siswa"} • {c.school_name || "SD Islam Sahabat Ibadah"}</span>
+                  <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                    <label style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, fontWeight: 700, background: "#e8f7f2", color: "#1b6d5c", padding: "4px 10px", borderRadius: 6, border: "1px solid #b2ded1" }}>
+                      <Camera size={12} />
+                      <span>{c.avatar_url ? "Ganti Foto Anak" : "Unggah Foto Anak"}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          if (file.size > 2 * 1024 * 1024) {
+                            alert("Ukuran foto maksimal 2MB");
+                            return;
+                          }
+                          const reader = new FileReader();
+                          reader.onload = async () => {
+                            if (onSaveChildAvatar) {
+                              await onSaveChildAvatar(c.id, reader.result as string);
+                            }
+                          };
+                          reader.readAsDataURL(file);
+                        }}
+                        style={{ display: "none" }}
+                      />
+                    </label>
+                    {c.avatar_url && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (window.confirm(`Hapus foto profil ${c.full_name}?`)) {
+                            if (onSaveChildAvatar) await onSaveChildAvatar(c.id, null);
+                          }
+                        }}
+                        style={{ background: "none", border: "none", color: "#dc2626", fontSize: 10, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3 }}
+                      >
+                        <Trash2 size={11} /> Hapus Foto
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
               <span style={{ fontSize: 10, fontWeight: 700, color: "#0a846c", background: "#e8f7f2", padding: "4px 10px", borderRadius: 8 }}>
@@ -5957,6 +6045,22 @@ export default function Home() {
     }
   };
 
+  const handleSaveChildAvatar = async (childId: string, avatarUrl: string | null) => {
+    try {
+      const res = await api.parent.updateChildAvatar(childId, avatarUrl);
+      setChildren((prev) =>
+        prev.map((c) => (c.id === childId ? { ...c, avatar_url: avatarUrl } : c))
+      );
+      setActiveChild((prev: any) =>
+        prev && prev.id === childId ? { ...prev, avatar_url: avatarUrl } : prev
+      );
+      showToast(res.message || "Foto profil anak berhasil diperbarui!");
+    } catch (err: any) {
+      showToast("Gagal memperbarui foto anak: " + err.message);
+      throw err;
+    }
+  };
+
   const loadTeacherData = async () => {
     try {
       const prof = await api.teacher.getProfile();
@@ -6372,6 +6476,7 @@ export default function Home() {
               teacherNote={teacherNote}
               schoolInfo={schoolInfo}
               onNavigate={setActiveTab}
+              onSaveChildAvatar={handleSaveChildAvatar}
               onGoToChecklistDate={(date) => {
                 setSelectedChecklistDate(date);
                 if (activeChild) loadChildChecklistForDate(activeChild.id, date);
@@ -6430,6 +6535,7 @@ export default function Home() {
               childrenList={children}
               onSaveProfile={handleSaveParentProfile}
               onChangePassword={handleChangeParentPassword}
+              onSaveChildAvatar={handleSaveChildAvatar}
             />
           )}
 

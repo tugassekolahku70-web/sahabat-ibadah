@@ -560,6 +560,15 @@ export const api = {
         body: JSON.stringify(data),
       }),
 
+    updateChildAvatar: (childId: string, avatar_url: string | null) =>
+      request<{ success: boolean; message: string; childId: string; avatarUrl: string | null }>(
+        `/children/${childId}/avatar`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ avatar_url }),
+        }
+      ),
+
     changePassword: (data: { current_password: string; new_password: string }) =>
       request<{ success: boolean; message: string }>("/parent/change-password", {
         method: "PUT",

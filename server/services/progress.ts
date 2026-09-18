@@ -119,7 +119,41 @@ export async function getChildDailyProgress(childId: string, date: string): Prom
  * Menghitung streak dan snapshot konsistensi anak
  */
 export async function calculateAndSaveStreak(childId: string): Promise<{ currentStreak: number; longestStreak: number }> {
-  // Hitung hari berturut-turut ke belakang dengan completion rate >= 75%
+  // Ambil school_id anak untuk tahu habit aktif
+  const child = await queryOne<{ school_id: string }>(
+    `SELECT school_id FROM children WHERE id = ?`,
+    [childId]
+  );
+  const schoolId = child?.school_id || "";
+
+  const habitCountRes = await queryOne<{ total: number }>(
+    `SELECT COUNT(*) as total FROM habit_template_items WHERE school_id = ? AND is_active = 1`,
+    [schoolId]
+  );
+  const totalHabits = Number(habitCountRes?.total || 0);
+
+  if (totalHabits === 0) {
+    return { currentStreak: 0, longestStreak: 0 };
+  }
+
+  // Ambil data checklist yang selesai 60 hari terakhir dalam 1 query agregasi cepat
+  const d60 = new Date();
+  d60.setDate(d60.getDate() - 60);
+  const startDateStr = d60.toISOString().split("T")[0];
+
+  const completedRows = await queryAll<{ entry_date: string; completed_count: number }>(
+    `SELECT entry_date, COUNT(*) as completed_count
+     FROM checklist_entries
+     WHERE child_id = ? AND entry_date >= ? AND status = 'completed'
+     GROUP BY entry_date`,
+    [childId, startDateStr]
+  );
+
+  const completedMap = new Map<string, number>();
+  for (const row of completedRows) {
+    completedMap.set(row.entry_date, Number(row.completed_count));
+  }
+
   let streak = 0;
   let maxStreak = 0;
 
@@ -128,14 +162,15 @@ export async function calculateAndSaveStreak(childId: string): Promise<{ current
     d.setDate(d.getDate() - i);
     const dateStr = d.toISOString().split("T")[0];
 
-    const { summary } = await getChildDailyProgress(childId, dateStr);
+    const completed = completedMap.get(dateStr) || 0;
+    const percentage = Math.round((completed / totalHabits) * 100);
 
     // Jika hari ini belum selesai (i === 0), tidak memutus streak hari sebelumnya bila belum mencapai 75%
-    if (i === 0 && summary.percentage < 75) {
+    if (i === 0 && percentage < 75) {
       continue;
     }
 
-    if (summary.percentage >= 75) {
+    if (percentage >= 75) {
       streak++;
       if (streak > maxStreak) maxStreak = streak;
     } else {
