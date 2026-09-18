@@ -7,35 +7,37 @@ const router = Router();
 router.use(authenticate);
 
 /**
- * 1. Ambil daftar thread percakapan untuk guru berdasarkan kelas aktif
+ * 1. Ambil daftar thread percakapan untuk guru berdasarkan kelas aktif atau semua kelas
  * GET /api/v1/messages/teacher/threads?classId=...
  */
 router.get(["/teacher/threads", "/threads/teacher"], async (req: Request, res: Response, next: NextFunction) => {
   try {
     const classId = req.query.classId as string;
-    if (!classId) {
-      return res.json({ success: true, threads: [] });
-    }
+    const isSpecificClass = Boolean(classId && classId !== "all");
 
-    // Ambil siswa dalam kelas ini
+    // Ambil siswa dalam kelas yang dipilih atau seluruh kelas yang diajar oleh guru ini
     const students = await queryAll<{
       id: string;
       full_name: string;
       preferred_name: string;
       avatar_url: string | null;
+      class_id: string;
+      class_name: string;
       parent_id: string | null;
       parent_name: string | null;
       parent_email: string | null;
     }>(
       `SELECT c.id, c.full_name, c.preferred_name, c.avatar_url,
+              cl.id as class_id, cl.name as class_name,
               u.id as parent_id, u.full_name as parent_name, u.email as parent_email
        FROM children c
        JOIN student_class_links scl ON c.id = scl.child_id
+       JOIN classes cl ON scl.class_id = cl.id
        LEFT JOIN parent_child_links pcl ON c.id = pcl.child_id
        LEFT JOIN users u ON pcl.parent_user_id = u.id
-       WHERE scl.class_id = ? AND c.status = 'active'
+       WHERE ${isSpecificClass ? "scl.class_id = ?" : "cl.teacher_id = ?"} AND c.status = 'active'
        ORDER BY c.full_name ASC`,
-      [classId]
+      [isSpecificClass ? classId : req.user!.id]
     );
 
     const now = nowISO();
@@ -63,8 +65,8 @@ router.get(["/teacher/threads", "/threads/teacher"], async (req: Request, res: R
     // 2. Ambil pesan terakhir untuk seluruh thread (1 Query batch cepat)
     const allThreads = Array.from(threadMap.values());
     const lastMessages = allThreads.length > 0
-      ? await queryAll<{ thread_id: string; body: string; sent_at: string }>(
-          `SELECT m.thread_id, m.body, m.sent_at
+      ? await queryAll<{ thread_id: string; body: string; sent_at: string; sender_id: string }>(
+          `SELECT m.thread_id, m.body, m.sent_at, m.sender_id
            FROM messages m
            JOIN (
              SELECT thread_id, MAX(sent_at) as max_sent
@@ -78,19 +80,32 @@ router.get(["/teacher/threads", "/threads/teacher"], async (req: Request, res: R
     const threads = students.map((s) => {
       const thread = threadMap.get(s.id)!;
       const lastMsg = msgMap.get(thread.id);
+      const isFromParent = Boolean(lastMsg && lastMsg.sender_id !== req.user!.id);
+
       return {
         threadId: thread.id,
         childId: s.id,
         childName: s.full_name,
         childPreferredName: s.preferred_name || s.full_name.split(" ")[0],
         childAvatarUrl: s.avatar_url,
+        classId: s.class_id,
+        className: s.class_name,
         parentId: s.parent_id,
         parentName: s.parent_name || "Orang Tua Belum Terdaftar",
         parentEmail: s.parent_email,
         lastMessage: lastMsg?.body || "Belum ada percakapan. Mulai kirim sapaan.",
         lastSentAt: lastMsg?.sent_at || thread.updated_at,
-        unreadCount: 0,
+        hasNewMessage: isFromParent,
+        unreadCount: isFromParent ? 1 : 0,
       };
+    });
+
+    // Urutkan: Pesan terbaru (terutama pesan baru masuk dari wali murid) selalu di urutan paling atas!
+    threads.sort((a, b) => {
+      if (a.unreadCount !== b.unreadCount) {
+        return b.unreadCount - a.unreadCount;
+      }
+      return new Date(b.lastSentAt).getTime() - new Date(a.lastSentAt).getTime();
     });
 
     res.json({

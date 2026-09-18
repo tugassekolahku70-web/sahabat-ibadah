@@ -3136,6 +3136,7 @@ function TeacherMessagesView({
   teacherAvatar?: string | null;
 }) {
   const [threads, setThreads] = useState<TeacherChatThread[]>([]);
+  const [selectedClassFilter, setSelectedClassFilter] = useState<string>("all");
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [activeThread, setActiveThread] = useState<TeacherChatThread | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
@@ -3145,19 +3146,27 @@ function TeacherMessagesView({
   const [search, setSearch] = useState("");
   const [showMobileChat, setShowMobileChat] = useState(false);
 
-  const loadThreads = async (classId: string) => {
-    if (!classId) return;
+  const loadThreads = async (classFilter: string = selectedClassFilter, preserveActive: boolean = true) => {
     setLoading(true);
     try {
-      const res = await api.messages.getTeacherThreads(classId);
+      const res = await api.messages.getTeacherThreads(classFilter);
       setThreads(res.threads || []);
 
       if (res.threads?.length > 0) {
         const match = initialChildId ? res.threads.find((t) => t.childId === initialChildId) : null;
-        const target = match || res.threads[0];
-        setActiveThreadId(target.threadId);
-        setActiveThread(target);
-        loadThreadMessages(target.threadId);
+        let target = match;
+        if (!target && preserveActive && activeThreadId) {
+          target = res.threads.find((t) => t.threadId === activeThreadId) || null;
+        }
+        if (!target) {
+          target = res.threads[0];
+        }
+
+        if (target) {
+          setActiveThreadId(target.threadId);
+          setActiveThread(target);
+          loadThreadMessages(target.threadId);
+        }
       } else {
         setActiveThreadId(null);
         setActiveThread(null);
@@ -3180,10 +3189,15 @@ function TeacherMessagesView({
   };
 
   useEffect(() => {
-    if (activeClassId) {
-      loadThreads(activeClassId);
-    }
-  }, [activeClassId, initialChildId]);
+    loadThreads(selectedClassFilter, true);
+
+    // Auto-refresh daftar pesan setiap 10 detik agar pesan baru dari orang tua langsung muncul
+    const timer = setInterval(() => {
+      loadThreads(selectedClassFilter, true);
+    }, 10000);
+
+    return () => clearInterval(timer);
+  }, [selectedClassFilter, initialChildId]);
 
   const handleSelectThread = (thread: TeacherChatThread) => {
     setActiveThreadId(thread.threadId);
@@ -3205,7 +3219,7 @@ function TeacherMessagesView({
       if (res.message) {
         setMessages((prev) => [...prev, res.message]);
         setThreads((prev) =>
-          prev.map((t) => (t.threadId === activeThreadId ? { ...t, lastMessage: text, lastSentAt: new Date().toISOString() } : t))
+          prev.map((t) => (t.threadId === activeThreadId ? { ...t, lastMessage: text, lastSentAt: new Date().toISOString(), hasNewMessage: false, unreadCount: 0 } : t))
         );
       }
     } catch (err) {
@@ -3224,7 +3238,8 @@ function TeacherMessagesView({
     return threads.filter(
       (t) =>
         t.childName.toLowerCase().includes(search.toLowerCase()) ||
-        t.parentName.toLowerCase().includes(search.toLowerCase())
+        t.parentName.toLowerCase().includes(search.toLowerCase()) ||
+        (t.className && t.className.toLowerCase().includes(search.toLowerCase()))
     );
   }, [threads, search]);
 
@@ -3241,12 +3256,70 @@ function TeacherMessagesView({
       <div className="chat-container-grid">
         {/* Kolom Kiri: Daftar Thread */}
         <div className={`chat-sidebar-col ${showMobileChat ? "mobile-hidden" : ""}`} style={{ borderRight: "1px solid #edf4f1", display: "flex", flexDirection: "column", background: "#fafdfc" }}>
-          <div style={{ padding: 14, borderBottom: "1px solid #edf4f1" }}>
+          {/* Tab Filter Kelas */}
+          <div style={{ padding: "10px 14px 6px 14px", borderBottom: "1px solid #edf4f1", background: "#f8fbf9" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 9, fontWeight: 800, color: "#7a9b94", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Filter Kelas
+              </span>
+              <button
+                type="button"
+                onClick={() => loadThreads(selectedClassFilter, true)}
+                title="Segarkan daftar pesan"
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#109f80", fontSize: 10, display: "inline-flex", alignItems: "center", gap: 3, fontWeight: 700 }}
+              >
+                <RefreshCw size={11} /> Segarkan
+              </button>
+            </div>
+            <div style={{ display: "flex", gap: 5, overflowX: "auto", paddingBottom: 4 }}>
+              <button
+                type="button"
+                onClick={() => setSelectedClassFilter("all")}
+                style={{
+                  padding: "3px 9px",
+                  borderRadius: 14,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  border: "1px solid",
+                  borderColor: selectedClassFilter === "all" ? "#109f80" : "#d8eae4",
+                  background: selectedClassFilter === "all" ? "#109f80" : "#ffffff",
+                  color: selectedClassFilter === "all" ? "#ffffff" : "#316056",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Semua Kelas
+              </button>
+              {classes.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setSelectedClassFilter(c.id)}
+                  style={{
+                    padding: "3px 9px",
+                    borderRadius: 14,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    border: "1px solid",
+                    borderColor: selectedClassFilter === c.id ? "#109f80" : "#d8eae4",
+                    background: selectedClassFilter === c.id ? "#109f80" : "#ffffff",
+                    color: selectedClassFilter === c.id ? "#ffffff" : "#316056",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ padding: "10px 14px", borderBottom: "1px solid #edf4f1" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff", padding: "6px 10px", borderRadius: 8, border: "1px solid #dcece7" }}>
               <Search size={14} style={{ color: "#7a9b94" }} />
               <input
                 type="text"
-                placeholder="Cari siswa atau wali..."
+                placeholder="Cari siswa, kelas, atau wali..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 style={{ width: "100%", background: "none", border: "none", outline: "none", fontSize: 11 }}
@@ -3255,7 +3328,7 @@ function TeacherMessagesView({
           </div>
 
           <div style={{ flex: 1, overflowY: "auto" }}>
-            {loading ? (
+            {loading && threads.length === 0 ? (
               <div style={{ padding: 24, textAlign: "center", color: "#8aa5a0", fontSize: 11 }}>Memuat daftar percakapan...</div>
             ) : filteredThreads.length === 0 ? (
               <div style={{ padding: 24, textAlign: "center", color: "#8aa5a0", fontSize: 11 }}>Tidak ada wali murid yang ditemukan.</div>
@@ -3272,8 +3345,8 @@ function TeacherMessagesView({
                       alignItems: "center",
                       gap: 10,
                       cursor: "pointer",
-                      background: isActive ? "#eff8f5" : "transparent",
-                      borderLeft: isActive ? "3px solid #0a9c7e" : "3px solid transparent",
+                      background: isActive ? "#eff8f5" : t.hasNewMessage ? "#f0fdf9" : "transparent",
+                      borderLeft: isActive ? "3px solid #0a9c7e" : t.hasNewMessage ? "3px solid #10b981" : "3px solid transparent",
                       borderBottom: "1px solid #edf4f1",
                       transition: "background 0.15s",
                     }}
@@ -3281,15 +3354,31 @@ function TeacherMessagesView({
                     <Avatar initials={t.childPreferredName.slice(0, 2).toUpperCase()} src={t.childAvatarUrl} tone="blue" size="normal" />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                        <strong style={{ fontSize: 11, color: "#194c44", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {t.childName}
-                        </strong>
-                        <span style={{ fontSize: 9, color: "#8ca8a2" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                          <strong style={{ fontSize: 11, color: "#194c44", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {t.childName}
+                          </strong>
+                          {t.className && (
+                            <span style={{ fontSize: 9, background: "#e8f7f2", color: "#147b67", padding: "1px 5px", borderRadius: 4, fontWeight: 700, flexShrink: 0 }}>
+                              {t.className}
+                            </span>
+                          )}
+                        </div>
+                        <span style={{ fontSize: 9, color: t.hasNewMessage ? "#059669" : "#8ca8a2", fontWeight: t.hasNewMessage ? 800 : 400, flexShrink: 0 }}>
                           {t.lastSentAt ? new Date(t.lastSentAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
                         </span>
                       </div>
-                      <span style={{ display: "block", fontSize: 10, color: "#7a9b94", marginTop: 1 }}>Wali: {t.parentName}</span>
-                      <p style={{ margin: "2px 0 0 0", fontSize: 10, color: "#547a72", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2 }}>
+                        <span style={{ fontSize: 10, color: "#7a9b94", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          Wali: {t.parentName}
+                        </span>
+                        {t.hasNewMessage && (
+                          <span style={{ fontSize: 8, background: "#10b981", color: "#ffffff", padding: "1px 5px", borderRadius: 8, fontWeight: 800, flexShrink: 0 }}>
+                            PESAN BARU
+                          </span>
+                        )}
+                      </div>
+                      <p style={{ margin: "2px 0 0 0", fontSize: 10, color: t.hasNewMessage ? "#0d5345" : "#547a72", fontWeight: t.hasNewMessage ? 700 : 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {t.lastMessage}
                       </p>
                     </div>

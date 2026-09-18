@@ -114,11 +114,14 @@ export interface TeacherChatThread {
   childName: string;
   childPreferredName: string;
   childAvatarUrl: string | null;
+  classId?: string;
+  className?: string;
   parentId: string | null;
   parentName: string;
   parentEmail: string | null;
   lastMessage: string;
   lastSentAt: string;
+  hasNewMessage?: boolean;
   unreadCount: number;
 }
 
@@ -617,12 +620,12 @@ export const api = {
   // Pesan Kontekstual Guru & Orang Tua
   // ===========================================================================
   messages: {
-    getTeacherThreads: (classId: string) =>
+    getTeacherThreads: (classId?: string) =>
       request<{
         success: boolean;
         teacherAvatarUrl?: string | null;
         threads: TeacherChatThread[];
-      }>(`/messages/teacher/threads?classId=${classId}`),
+      }>(`/messages/teacher/threads${classId && classId !== "all" ? `?classId=${classId}` : ""}`),
 
     getThreads: (childId?: string) =>
       request<{
