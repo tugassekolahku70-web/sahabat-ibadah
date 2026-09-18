@@ -1,12 +1,30 @@
-import { db, hashPassword, initSchema, nowISO } from "./index.js";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { db, pgPool, isPostgres, hashPassword, initSchema, nowISO } from "./index.js";
 import { seed50Students } from "./seed_50_students.js";
 
-export function seedDatabase() {
-  console.log("🌱 Memulai seeding database lokal Sahabat Ibadah...");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+export async function seedDatabase() {
+  console.log("🌱 Memulai seeding database Sahabat Ibadah...");
+
+  if (isPostgres && pgPool) {
+    console.log("🐘 Mendeteksi Supabase PostgreSQL. Menjalankan seed 50 siswa ke Supabase...");
+    const sqlPath = path.resolve(__dirname, "supabase_seed_50_students.sql");
+    if (fs.existsSync(sqlPath)) {
+      const sqlContent = fs.readFileSync(sqlPath, "utf-8");
+      await pgPool.query(sqlContent);
+      console.log("✅ Berhasil melakukan seeding 50 siswa ke Supabase PostgreSQL!");
+      return;
+    }
+  }
+
   initSchema();
 
   if (!db) {
-    console.log("Database SQLite lokal tidak aktif (menggunakan PostgreSQL cloud). Seeding lokal dilewati.");
+    console.log("Database SQLite lokal tidak aktif. Seeding lokal dilewati.");
     return;
   }
   const sqlite = db;

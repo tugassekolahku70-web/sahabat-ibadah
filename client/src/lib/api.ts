@@ -212,12 +212,13 @@ export const api = {
 
     updateProfile: (data: {
       full_name: string;
+      email?: string;
       phone?: string;
       school_name?: string;
       school_logo_url?: string | null;
       avatar_url?: string | null;
     }) =>
-      request<{ success: boolean; message: string }>("/teacher/profile", {
+      request<{ success: boolean; message: string; email?: string }>("/teacher/profile", {
         method: "PUT",
         body: JSON.stringify(data),
       }),

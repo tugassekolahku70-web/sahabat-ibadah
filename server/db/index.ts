@@ -249,4 +249,5 @@ export async function transaction<T>(callback: () => Promise<T> | T): Promise<T>
 }
 
 export const db = sqliteDb;
-export default { db: sqliteDb, isPostgres, queryAll, queryOne, execute, transaction };
+export { pgPool };
+export default { db: sqliteDb, pgPool, isPostgres, queryAll, queryOne, execute, transaction };

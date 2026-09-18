@@ -58,24 +58,50 @@ router.get(["/profile", "/teacher/profile"], async (req: Request, res: Response,
 });
 
 /**
- * 2. Edit Profil Guru & Pengaturan Sekolah (Termasuk Foto Guru & Logo Sekolah)
+ * 2. Edit Profil Guru & Pengaturan Sekolah (Termasuk Email Guru, Foto Guru & Logo Sekolah)
  * PUT /api/v1/teacher/profile
  */
 router.put(["/profile", "/teacher/profile"], async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { full_name, phone, school_name, school_logo_url, avatar_url } = req.body;
+    const { full_name, email, phone, school_name, school_logo_url, avatar_url } = req.body;
     const now = nowISO();
 
     if (!full_name) throw new AppError("Nama lengkap wajib diisi.", { status: 400 });
 
-    await transaction(async () => {
-      // Update profil guru
-      await execute(
-        `UPDATE users
-         SET full_name = ?, phone = ?, avatar_url = ?, updated_at = ?
-         WHERE id = ?`,
-        [full_name.trim(), phone?.trim() || null, avatar_url !== undefined ? avatar_url : null, now, req.user!.id]
+    let cleanEmail: string | undefined = undefined;
+    if (email !== undefined) {
+      cleanEmail = String(email).trim().toLowerCase();
+      if (!cleanEmail || !cleanEmail.includes("@") || !cleanEmail.includes(".")) {
+        throw new AppError("Format alamat email guru tidak valid.", { status: 400 });
+      }
+
+      // Pastikan email baru belum digunakan oleh akun aktif lain
+      const existing = await queryOne<{ id: string }>(
+        `SELECT id FROM users WHERE LOWER(email) = ? AND id != ? AND status = 'active'`,
+        [cleanEmail, req.user!.id]
       );
+      if (existing) {
+        throw new AppError("Email ini sudah digunakan oleh akun lain. Silakan gunakan email berbeda.", { status: 409 });
+      }
+    }
+
+    await transaction(async () => {
+      // Update profil guru (termasuk email jika diberikan)
+      if (cleanEmail) {
+        await execute(
+          `UPDATE users
+           SET full_name = ?, email = ?, phone = ?, avatar_url = ?, updated_at = ?
+           WHERE id = ?`,
+          [full_name.trim(), cleanEmail, phone?.trim() || null, avatar_url !== undefined ? avatar_url : null, now, req.user!.id]
+        );
+      } else {
+        await execute(
+          `UPDATE users
+           SET full_name = ?, phone = ?, avatar_url = ?, updated_at = ?
+           WHERE id = ?`,
+          [full_name.trim(), phone?.trim() || null, avatar_url !== undefined ? avatar_url : null, now, req.user!.id]
+        );
+      }
 
       // Update profil sekolah (nama & logo)
       if (school_name || school_logo_url !== undefined) {
@@ -96,11 +122,15 @@ router.put(["/profile", "/teacher/profile"], async (req: Request, res: Response,
       action: "teacher.profile_updated",
       entityType: "user",
       entityId: req.user!.id,
-      after: { full_name, phone, school_name, has_logo: Boolean(school_logo_url) },
+      after: { full_name, email: cleanEmail, phone, school_name, has_logo: Boolean(school_logo_url) },
       ip: req.ip,
     });
 
-    res.json({ success: true, message: "Profil guru & sekolah berhasil diperbarui." });
+    res.json({
+      success: true,
+      message: "Profil guru & sekolah berhasil diperbarui.",
+      email: cleanEmail,
+    });
   } catch (err) {
     next(err);
   }

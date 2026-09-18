@@ -4743,6 +4743,7 @@ function TeacherSettings({
   teacher: any;
   onSaveProfile: (data: {
     full_name: string;
+    email?: string;
     phone: string;
     school_name: string;
     school_logo_url?: string | null;
@@ -4751,6 +4752,7 @@ function TeacherSettings({
   onChangePassword: (data: { current_password: string; new_password: string }) => Promise<void>;
 }) {
   const [fullName, setFullName] = useState(teacher?.full_name || "");
+  const [email, setEmail] = useState(teacher?.email || "");
   const [phone, setPhone] = useState(teacher?.phone || "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(teacher?.avatar_url || null);
 
@@ -4770,6 +4772,7 @@ function TeacherSettings({
   useEffect(() => {
     if (teacher) {
       setFullName(teacher.full_name || "");
+      setEmail(teacher.email || "");
       setPhone(teacher.phone || "");
       setAvatarUrl(teacher.avatar_url || null);
       setSchoolName(teacher.school_name || "");
@@ -4811,6 +4814,7 @@ function TeacherSettings({
     try {
       await onSaveProfile({
         full_name: fullName,
+        email,
         phone,
         school_name: schoolName,
         school_logo_url: schoolLogoUrl,
@@ -4930,6 +4934,18 @@ function TeacherSettings({
               type="text"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
+              required
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #cbe3dc", marginTop: 6, fontSize: 12, outline: "none" }}
+            />
+          </label>
+
+          <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#365c55" }}>
+            Alamat Email Guru (Untuk Masuk Aplikasi)
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="contoh: andi@sekolah.sch.id"
               required
               style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #cbe3dc", marginTop: 6, fontSize: 12, outline: "none" }}
             />
@@ -5142,14 +5158,14 @@ function LoginPage({
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [isRegisterMode, setIsRegisterMode] = useState(false);
 
-  // Form states
+  // Form states - Bersih kosong secara default untuk pengunjung baru
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [schoolName, setSchoolName] = useState("");
-  const [rememberMe, setRememberMe] = useState(true);
+  const [rememberMe, setRememberMe] = useState(false);
 
-  // Load saved credentials on mount if remembered
+  // Load saved credentials on mount HANYA jika pengguna sebelumnya mencentang "Ingat saya"
   useEffect(() => {
     try {
       const saved = localStorage.getItem("sahabat_ibadah_remember_login");
@@ -5158,7 +5174,9 @@ function LoginPage({
         if (parsed.email && parsed.role) {
           setSelectedRole(parsed.role);
           setEmail(parsed.email);
-          setPassword("password123");
+          if (parsed.password) {
+            setPassword(parsed.password);
+          }
           setRememberMe(true);
         }
       }
@@ -5182,7 +5200,7 @@ function LoginPage({
       if (rememberMe) {
         localStorage.setItem(
           "sahabat_ibadah_remember_login",
-          JSON.stringify({ email, role: selectedRole })
+          JSON.stringify({ email, password, role: selectedRole })
         );
       } else {
         localStorage.removeItem("sahabat_ibadah_remember_login");
@@ -5273,21 +5291,22 @@ function LoginPage({
               className={`role-card role-parent ${selectedRole === "parent" ? "selected" : ""}`}
               onClick={() => {
                 setSelectedRole("parent");
+                setErrorMsg("");
                 try {
                   const saved = localStorage.getItem("sahabat_ibadah_remember_login");
                   if (saved) {
                     const parsed = JSON.parse(saved);
                     if (parsed.role === "parent" && parsed.email) {
                       setEmail(parsed.email);
-                      setPassword("password123");
-                      setErrorMsg("");
+                      setPassword(parsed.password || "");
+                      setRememberMe(true);
                       return;
                     }
                   }
                 } catch (e) {}
-                setEmail("rina@keluarga.id");
-                setPassword("password123");
-                setErrorMsg("");
+                setEmail("");
+                setPassword("");
+                setRememberMe(false);
               }}
             >
               <div className="role-art role-art-parent">
@@ -5304,21 +5323,22 @@ function LoginPage({
               className={`role-card role-teacher ${selectedRole === "teacher" ? "selected" : ""}`}
               onClick={() => {
                 setSelectedRole("teacher");
+                setErrorMsg("");
                 try {
                   const saved = localStorage.getItem("sahabat_ibadah_remember_login");
                   if (saved) {
                     const parsed = JSON.parse(saved);
                     if (parsed.role === "teacher" && parsed.email) {
                       setEmail(parsed.email);
-                      setPassword("password123");
-                      setErrorMsg("");
+                      setPassword(parsed.password || "");
+                      setRememberMe(true);
                       return;
                     }
                   }
                 } catch (e) {}
-                setEmail("andi@sekolah.sch.id");
-                setPassword("password123");
-                setErrorMsg("");
+                setEmail("");
+                setPassword("");
+                setRememberMe(false);
               }}
             >
               <div className="role-art role-art-teacher">
@@ -6087,6 +6107,7 @@ export default function Home() {
 
   const handleSaveProfile = async (data: {
     full_name: string;
+    email?: string;
     phone: string;
     school_name: string;
     school_logo_url?: string | null;
