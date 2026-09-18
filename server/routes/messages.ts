@@ -38,33 +38,47 @@ router.get(["/teacher/threads", "/threads/teacher"], async (req: Request, res: R
       [classId]
     );
 
-    const threads = [];
     const now = nowISO();
 
-    for (const s of students) {
-      // Cari atau buat thread percakapan per siswa
-      let thread = await queryOne<{ id: string; updated_at: string }>(
-        `SELECT id, updated_at FROM message_threads WHERE school_id = ? AND child_id = ? LIMIT 1`,
-        [req.user!.schoolId, s.id]
-      );
+    // 1. Ambil seluruh thread yang sudah ada untuk sekolah ini (1 Query batch cepat)
+    const existingThreads = await queryAll<{ id: string; child_id: string; updated_at: string }>(
+      `SELECT id, child_id, updated_at FROM message_threads WHERE school_id = ?`,
+      [req.user!.schoolId]
+    );
+    const threadMap = new Map(existingThreads.map((t) => [t.child_id, t]));
 
-      if (!thread) {
+    // Buat thread untuk siswa yang belum memiliki thread
+    for (const s of students) {
+      if (!threadMap.has(s.id)) {
         const newThreadId = `thread-${generateUUID().slice(0, 8)}`;
         await execute(
           `INSERT INTO message_threads (id, school_id, child_id, created_by, status, created_at, updated_at)
            VALUES (?, ?, ?, ?, 'open', ?, ?)`,
           [newThreadId, req.user!.schoolId, s.id, req.user!.id, now, now]
         );
-        thread = { id: newThreadId, updated_at: now };
+        threadMap.set(s.id, { id: newThreadId, child_id: s.id, updated_at: now });
       }
+    }
 
-      // Ambil pesan terakhir
-      const lastMsg = await queryOne<{ body: string; sent_at: string; sender_id: string }>(
-        `SELECT body, sent_at, sender_id FROM messages WHERE thread_id = ? ORDER BY sent_at DESC LIMIT 1`,
-        [thread.id]
-      );
+    // 2. Ambil pesan terakhir untuk seluruh thread (1 Query batch cepat)
+    const allThreads = Array.from(threadMap.values());
+    const lastMessages = allThreads.length > 0
+      ? await queryAll<{ thread_id: string; body: string; sent_at: string }>(
+          `SELECT m.thread_id, m.body, m.sent_at
+           FROM messages m
+           JOIN (
+             SELECT thread_id, MAX(sent_at) as max_sent
+             FROM messages
+             GROUP BY thread_id
+           ) latest ON m.thread_id = latest.thread_id AND m.sent_at = latest.max_sent`
+        )
+      : [];
+    const msgMap = new Map(lastMessages.map((m) => [m.thread_id, m]));
 
-      threads.push({
+    const threads = students.map((s) => {
+      const thread = threadMap.get(s.id)!;
+      const lastMsg = msgMap.get(thread.id);
+      return {
         threadId: thread.id,
         childId: s.id,
         childName: s.full_name,
@@ -76,8 +90,8 @@ router.get(["/teacher/threads", "/threads/teacher"], async (req: Request, res: R
         lastMessage: lastMsg?.body || "Belum ada percakapan. Mulai kirim sapaan.",
         lastSentAt: lastMsg?.sent_at || thread.updated_at,
         unreadCount: 0,
-      });
-    }
+      };
+    });
 
     res.json({
       success: true,

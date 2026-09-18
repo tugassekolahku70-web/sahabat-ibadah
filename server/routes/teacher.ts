@@ -348,20 +348,48 @@ router.get(["/classes/:classId/students", "/:classId/students", "/teacher/classe
       [classId]
     );
 
-    // Hitung progres harian hari ini per siswa
-    const listWithProgress = await Promise.all(
-      students.map(async (s) => {
-        const { summary } = await getChildDailyProgress(s.id, today);
-        return {
-          ...s,
-          hasParentAccount: Boolean(s.parent_user_id && s.parent_email),
-          todayProgress: summary.percentage,
-          completedCount: summary.completedCount,
-          totalHabits: summary.totalHabits,
-          statusLabel: summary.notReportedCount === summary.totalHabits ? "Belum diisi" : `${summary.percentage}% selesai`,
-        };
-      })
+    // 1. Ambil jumlah habit aktif di sekolah (1 query ringan)
+    const habits = await queryAll<{ id: string }>(
+      `SELECT id FROM habit_template_items WHERE school_id = ? AND is_active = 1`,
+      [req.user!.schoolId]
     );
+    const totalHabits = habits.length || 8;
+
+    // 2. Ambil seluruh entri hari ini untuk sekolah ini dalam 1 Query batch cepat
+    const todayEntries = await queryAll<{
+      child_id: string;
+      habit_item_id: string;
+      status: string;
+    }>(
+      `SELECT child_id, habit_item_id, status
+       FROM checklist_entries
+       WHERE school_id = ? AND entry_date = ?`,
+      [req.user!.schoolId, today]
+    );
+
+    const childEntriesMap = new Map<string, Array<{ status: string }>>();
+    for (const e of todayEntries) {
+      const arr = childEntriesMap.get(e.child_id) || [];
+      arr.push(e);
+      childEntriesMap.set(e.child_id, arr);
+    }
+
+    const listWithProgress = students.map((s) => {
+      const entries = childEntriesMap.get(s.id) || [];
+      const completedCount = entries.filter((e) => e.status === "completed").length;
+      const reportedCount = entries.filter((e) => e.status !== "not_reported").length;
+      const notReportedCount = totalHabits - reportedCount;
+      const percentage = totalHabits > 0 ? Math.round((completedCount / totalHabits) * 100) : 0;
+
+      return {
+        ...s,
+        hasParentAccount: Boolean(s.parent_user_id && s.parent_email),
+        todayProgress: percentage,
+        completedCount,
+        totalHabits,
+        statusLabel: reportedCount === 0 ? "Belum diisi" : `${percentage}% selesai`,
+      };
+    });
 
     res.json({ success: true, students: listWithProgress });
   } catch (err) {
@@ -713,57 +741,84 @@ router.get(["/classes/:classId/weekly-report", "/:classId/weekly-report", "/teac
       });
     });
 
+    // Ambil seluruh entri checklist untuk rentang tanggal ini dalam 1 QUERY BATCH CEPAT
+    const startDate = dates[0];
+    const endDate = dates[dates.length - 1];
+
+    const rangeEntries = await queryAll<{
+      child_id: string;
+      habit_item_id: string;
+      entry_date: string;
+      status: string;
+    }>(
+      `SELECT child_id, habit_item_id, entry_date, status
+       FROM checklist_entries
+       WHERE school_id = ? AND entry_date >= ? AND entry_date <= ?`,
+      [req.user!.schoolId, startDate, endDate]
+    );
+
+    // Map lookup cepat: `${child_id}:${entry_date}:${habit_item_id}`
+    const entryLookup = new Map<string, string>();
+    for (const e of rangeEntries) {
+      entryLookup.set(`${e.child_id}:${e.entry_date}:${e.habit_item_id}`, e.status);
+    }
+
     let totalClassEntries = 0;
+    const totalHabitsCount = habits.length || 8;
 
-    const studentMatrix = await Promise.all(
-      students.map(async (s) => {
-        let studentCompletedEntries = 0;
-        let studentActiveDays = 0;
+    const studentMatrix = students.map((s) => {
+      let studentCompletedEntries = 0;
+      let studentActiveDays = 0;
 
-        const days = await Promise.all(
-          dates.map(async (date) => {
-            const dObj = new Date(date);
-            const dayLabel = dayNames[dObj.getDay()];
+      const days = dates.map((date) => {
+        const dObj = new Date(date);
+        const dayLabel = dayNames[dObj.getDay()];
 
-            const { summary, items } = await getChildDailyProgress(s.id, date);
-            const isReported = summary.notReportedCount < summary.totalHabits;
-            if (isReported) studentActiveDays++;
+        let completedCount = 0;
+        let reportedCount = 0;
 
-            studentCompletedEntries += summary.completedCount;
-            totalClassEntries += summary.completedCount;
+        habits.forEach((h) => {
+          const status = entryLookup.get(`${s.id}:${date}:${h.id}`) || "not_reported";
+          if (status === "completed") {
+            completedCount++;
+            reportedCount++;
+            if (habitStatsMap.has(h.id)) {
+              habitStatsMap.get(h.id)!.completedCount++;
+            }
+          } else if (status === "not_completed") {
+            reportedCount++;
+          }
+        });
 
-            // Update habit counter
-            items.forEach((it) => {
-              if (it.checked && habitStatsMap.has(it.id)) {
-                habitStatsMap.get(it.id)!.completedCount++;
-              }
-            });
+        if (reportedCount > 0) studentActiveDays++;
+        studentCompletedEntries += completedCount;
+        totalClassEntries += completedCount;
 
-            return {
-              date,
-              dayLabel,
-              percentage: summary.percentage,
-              completedCount: summary.completedCount,
-              totalHabits: summary.totalHabits,
-              status: summary.percentage >= 80 ? "complete" : summary.percentage > 0 ? "partial" : "unreported",
-            };
-          })
-        );
-
-        const maxPossibleForStudent = dates.length * (habits.length || 1);
-        const weeklyAverage = maxPossibleForStudent > 0 ? Math.round((studentCompletedEntries / maxPossibleForStudent) * 100) : 0;
+        const percentage = totalHabitsCount > 0 ? Math.round((completedCount / totalHabitsCount) * 100) : 0;
 
         return {
-          id: s.id,
-          name: s.full_name,
-          preferredName: s.preferred_name || s.full_name.split(" ")[0],
-          avatarUrl: s.avatar_url,
-          days,
-          weeklyAverage,
-          activeDays: studentActiveDays,
+          date,
+          dayLabel,
+          percentage,
+          completedCount,
+          totalHabits: totalHabitsCount,
+          status: percentage >= 80 ? "complete" : percentage > 0 ? "partial" : "unreported",
         };
-      })
-    );
+      });
+
+      const maxPossibleForStudent = dates.length * totalHabitsCount;
+      const weeklyAverage = maxPossibleForStudent > 0 ? Math.round((studentCompletedEntries / maxPossibleForStudent) * 100) : 0;
+
+      return {
+        id: s.id,
+        name: s.full_name,
+        preferredName: s.preferred_name || s.full_name.split(" ")[0],
+        avatarUrl: s.avatar_url,
+        days,
+        weeklyAverage,
+        activeDays: studentActiveDays,
+      };
+    });
 
     const totalPossibleClassEntries = Math.max(1, students.length * dates.length * (habits.length || 1));
     const classWeeklyAverage = Math.round((totalClassEntries / totalPossibleClassEntries) * 100);
@@ -831,21 +886,44 @@ router.get(["/classes/:classId/summary", "/:classId/summary", "/teacher/classes/
       [classId]
     );
 
+    // 1. Ambil jumlah habit aktif
+    const habits = await queryAll<{ id: string }>(
+      `SELECT id FROM habit_template_items WHERE school_id = ? AND is_active = 1`,
+      [req.user!.schoolId]
+    );
+    const totalHabits = habits.length || 8;
+
+    // 2. Ambil seluruh entri checklist hari ini dalam 1 query batch
+    const todayEntries = await queryAll<{ child_id: string; status: string }>(
+      `SELECT child_id, status FROM checklist_entries WHERE school_id = ? AND entry_date = ?`,
+      [req.user!.schoolId, today]
+    );
+
+    const childEntriesMap = new Map<string, Array<{ status: string }>>();
+    for (const e of todayEntries) {
+      const arr = childEntriesMap.get(e.child_id) || [];
+      arr.push(e);
+      childEntriesMap.set(e.child_id, arr);
+    }
+
     let totalPercentage = 0;
     let reportedCount = 0;
     const progressList: Array<{ id: string; name: string; rate: number; notReported: boolean; avatarUrl: string | null }> = [];
 
     for (const s of students) {
-      const { summary } = await getChildDailyProgress(s.id, today);
-      totalPercentage += summary.percentage;
-      const isReported = summary.notReportedCount < summary.totalHabits;
-      if (isReported) reportedCount++;
+      const entries = childEntriesMap.get(s.id) || [];
+      const completedCount = entries.filter((e) => e.status === "completed").length;
+      const hasReported = entries.some((e) => e.status !== "not_reported");
+      const percentage = totalHabits > 0 ? Math.round((completedCount / totalHabits) * 100) : 0;
+
+      totalPercentage += percentage;
+      if (hasReported) reportedCount++;
 
       progressList.push({
         id: s.id,
         name: s.full_name,
-        rate: summary.percentage,
-        notReported: !isReported,
+        rate: percentage,
+        notReported: !hasReported,
         avatarUrl: s.avatar_url,
       });
     }
@@ -917,11 +995,33 @@ router.get(
         [classId]
       );
 
+      const habits = await queryAll<{ id: string }>(
+        `SELECT id FROM habit_template_items WHERE school_id = ? AND is_active = 1`,
+        [req.user!.schoolId]
+      );
+      const totalHabits = habits.length || 8;
+
+      const todayEntries = await queryAll<{ child_id: string; status: string }>(
+        `SELECT child_id, status FROM checklist_entries WHERE school_id = ? AND entry_date = ?`,
+        [req.user!.schoolId, today]
+      );
+
+      const childEntriesMap = new Map<string, Array<{ status: string }>>();
+      for (const e of todayEntries) {
+        const arr = childEntriesMap.get(e.child_id) || [];
+        arr.push(e);
+        childEntriesMap.set(e.child_id, arr);
+      }
+
       const attentionList = [];
 
       for (const s of students) {
-        const { summary } = await getChildDailyProgress(s.id, today);
-        if (summary.notReportedCount === summary.totalHabits) {
+        const entries = childEntriesMap.get(s.id) || [];
+        const completedCount = entries.filter((e) => e.status === "completed").length;
+        const hasReported = entries.some((e) => e.status !== "not_reported");
+        const percentage = totalHabits > 0 ? Math.round((completedCount / totalHabits) * 100) : 0;
+
+        if (!hasReported) {
           attentionList.push({
             id: s.id,
             name: s.full_name,
@@ -929,12 +1029,12 @@ router.get(
             reason: "Belum mengisi checklist hari ini",
             status: "unreported",
           });
-        } else if (summary.percentage < 50) {
+        } else if (percentage < 50) {
           attentionList.push({
             id: s.id,
             name: s.full_name,
             avatarUrl: s.avatar_url,
-            reason: `Progres ibadah rendah (${summary.percentage}%)`,
+            reason: `Progres ibadah rendah (${percentage}%)`,
             status: "low_progress",
           });
         }
