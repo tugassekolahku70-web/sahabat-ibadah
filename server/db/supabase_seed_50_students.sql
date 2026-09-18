@@ -1,11 +1,26 @@
 -- =============================================================================
--- SAHABAT IBADAH — SKRIP SEED SUPABASE POSTGRESQL
--- Berisi 50 Siswa (Kelas 1A & 2A), 50 Akun Ortu, & Riwayat Ceklis (4 Ags - 17 Sept 2026)
--- Dijalankan di Supabase SQL Editor: Langsung Paste & Klik RUN
+-- BAGIAN 1 DARI 4: SKEMA, AKUN GURU, 2 KELAS, 50 SISWA & 50 AKUN ORANG TUA
+-- Ukuran sangat ringan (~50 KB) - Langsung Run di Supabase SQL Editor
 -- =============================================================================
 
--- 1. SKEMA TABEL POSTGRESQL
+-- =============================================================================
+-- SAHABAT IBADAH — SKEMA TABEL POSTGRESQL (SUPABASE)
+-- =============================================================================
 
+-- 1. Bersihkan tabel lama jika ada agar struktur 50 siswa masuk bersih tanpa bentrok kunci unik
+DROP TABLE IF EXISTS checklist_notes, streak_snapshots, points_ledger, child_badges, badges,
+  checklist_entries, parent_child_links, teacher_class_links, student_class_links,
+  children, habit_periods, habit_template_items, habit_templates, classes,
+  email_verifications, user_roles, users, schools, audit_logs CASCADE;
+
+-- =============================================================================
+-- Sahabat Ibadah Database Schema (SQLite)
+-- Sesuai PRD Bab 9, Isolasi Data Per-Guru & Registrasi OTP
+-- =============================================================================
+
+
+
+-- 1. Schools (Tenant / Organisasi Sekolah atau Institusi Guru)
 CREATE TABLE IF NOT EXISTS schools (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -18,6 +33,7 @@ CREATE TABLE IF NOT EXISTS schools (
   updated_at TEXT NOT NULL
 );
 
+-- 2. Users (Akun Guru, Orang Tua, Admin)
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT UNIQUE,
@@ -31,6 +47,7 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TEXT NOT NULL
 );
 
+-- 3. User Roles (Relasi Akun dengan Peran dan Sekolah)
 CREATE TABLE IF NOT EXISTS user_roles (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -40,6 +57,7 @@ CREATE TABLE IF NOT EXISTS user_roles (
   UNIQUE(user_id, school_id, role)
 );
 
+-- 4. Email Verifications & OTP (Pendaftaran Guru dengan OTP Email)
 CREATE TABLE IF NOT EXISTS email_verifications (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL,
@@ -53,6 +71,7 @@ CREATE TABLE IF NOT EXISTS email_verifications (
   created_at TEXT NOT NULL
 );
 
+-- 5. Classes (Rombel / Kelas yang dimiliki dan dikelola guru secara terisolasi)
 CREATE TABLE IF NOT EXISTS classes (
   id TEXT PRIMARY KEY,
   school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
@@ -65,6 +84,7 @@ CREATE TABLE IF NOT EXISTS classes (
   updated_at TEXT NOT NULL
 );
 
+-- 6. Children (Profil Data Siswa)
 CREATE TABLE IF NOT EXISTS children (
   id TEXT PRIMARY KEY,
   school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
@@ -79,6 +99,7 @@ CREATE TABLE IF NOT EXISTS children (
   updated_at TEXT NOT NULL
 );
 
+-- 7. Student Class Links (Penghubung Siswa dengan Kelas Guru)
 CREATE TABLE IF NOT EXISTS student_class_links (
   id TEXT PRIMARY KEY,
   child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
@@ -88,6 +109,7 @@ CREATE TABLE IF NOT EXISTS student_class_links (
   UNIQUE(child_id, class_id)
 );
 
+-- 8. Teacher Class Links
 CREATE TABLE IF NOT EXISTS teacher_class_links (
   id TEXT PRIMARY KEY,
   teacher_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -97,54 +119,71 @@ CREATE TABLE IF NOT EXISTS teacher_class_links (
   UNIQUE(teacher_user_id, class_id)
 );
 
+-- 9. Parent Child Links (Penghubung Orang Tua dengan Siswa)
 CREATE TABLE IF NOT EXISTS parent_child_links (
   id TEXT PRIMARY KEY,
   parent_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
   relationship TEXT NOT NULL DEFAULT 'parent',
-  is_primary INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   UNIQUE(parent_user_id, child_id)
 );
 
+-- 10. Habit Templates
 CREATE TABLE IF NOT EXISTS habit_templates (
   id TEXT PRIMARY KEY,
   school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   description TEXT,
-  is_default INTEGER NOT NULL DEFAULT 0,
+  is_default INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 
+-- 11. Habit Template Items (Daftar Ibadah & Kebiasaan)
 CREATE TABLE IF NOT EXISTS habit_template_items (
   id TEXT PRIMARY KEY,
   school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
-  template_id TEXT NOT NULL REFERENCES habit_templates(id) ON DELETE CASCADE,
+  template_id TEXT REFERENCES habit_templates(id) ON DELETE CASCADE,
   category TEXT NOT NULL CHECK (category IN ('ibadah_wajib', 'ibadah_harian', 'kebiasaan_baik')),
   name TEXT NOT NULL,
   description TEXT,
-  icon_key TEXT NOT NULL,
-  sort_order INTEGER NOT NULL DEFAULT 1,
+  icon_key TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 
+-- 12. Habit Periods
+CREATE TABLE IF NOT EXISTS habit_periods (
+  id TEXT PRIMARY KEY,
+  school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL
+);
+
+-- 13. Checklist Entries (Status Catatan Ibadah Siswa Harian)
 CREATE TABLE IF NOT EXISTS checklist_entries (
   id TEXT PRIMARY KEY,
   school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
   child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
-  habit_id TEXT NOT NULL,
+  habit_item_id TEXT NOT NULL REFERENCES habit_template_items(id) ON DELETE CASCADE,
   entry_date TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('completed', 'not_completed', 'not_reported')),
-  completed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-  completed_at TEXT,
+  status TEXT NOT NULL DEFAULT 'not_reported' CHECK (status IN ('completed', 'not_completed', 'not_reported')),
+  reported_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+  reported_at TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'parent' CHECK (source IN ('parent', 'teacher', 'admin', 'system')),
+  version INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  UNIQUE(child_id, habit_id, entry_date)
+  UNIQUE(child_id, habit_item_id, entry_date)
 );
 
+-- 14. Checklist Notes (Catatan Harian Orang Tua atau Apresiasi Guru)
 CREATE TABLE IF NOT EXISTS checklist_notes (
   id TEXT PRIMARY KEY,
   school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
@@ -152,55 +191,168 @@ CREATE TABLE IF NOT EXISTS checklist_notes (
   entry_date TEXT NOT NULL,
   note TEXT NOT NULL,
   author_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  author_role TEXT NOT NULL CHECK (author_role IN ('parent', 'teacher')),
+  author_role TEXT NOT NULL CHECK (author_role IN ('parent', 'teacher', 'admin')),
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  UNIQUE(child_id, entry_date, author_role)
+  updated_at TEXT NOT NULL
 );
 
+-- 15. Streak Snapshots (Snapshot Konsistensi)
 CREATE TABLE IF NOT EXISTS streak_snapshots (
   id TEXT PRIMARY KEY,
   child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
   current_streak INTEGER NOT NULL DEFAULT 0,
   longest_streak INTEGER NOT NULL DEFAULT 0,
-  last_activity_date TEXT,
+  last_calculated_date TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE(child_id)
 );
 
+-- 16. Points Ledger (Buku Besar Poin Kebaikan Immutable)
 CREATE TABLE IF NOT EXISTS points_ledger (
   id TEXT PRIMARY KEY,
   school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
   child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
-  points_change INTEGER NOT NULL,
-  reason TEXT NOT NULL DEFAULT 'Tuntaskan Ibadah Harian',
+  points INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  source_type TEXT NOT NULL DEFAULT 'checklist',
   created_at TEXT NOT NULL
 );
 
+-- 17. Badges (Definisi Lencana Apresiasi)
+CREATE TABLE IF NOT EXISTS badges (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  icon_key TEXT NOT NULL,
+  criteria_key TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+-- 18. Child Badges (Lencana yang Diperoleh Siswa)
+CREATE TABLE IF NOT EXISTS child_badges (
+  id TEXT PRIMARY KEY,
+  child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+  badge_id TEXT NOT NULL REFERENCES badges(id) ON DELETE CASCADE,
+  earned_at TEXT NOT NULL,
+  UNIQUE(child_id, badge_id)
+);
+
+-- 19. Message Threads
+CREATE TABLE IF NOT EXISTS message_threads (
+  id TEXT PRIMARY KEY,
+  school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+  child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+  created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- 20. Messages (Pesan Guru & Orang Tua Terikat Siswa)
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,
+  thread_id TEXT NOT NULL REFERENCES message_threads(id) ON DELETE CASCADE,
+  sender_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  sent_at TEXT NOT NULL,
+  read_at TEXT,
+  deleted_at TEXT
+);
+
+-- 21. Notifications
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'info',
+  read_at TEXT,
+  created_at TEXT NOT NULL
+);
+
+-- 22. Notification Preferences
+CREATE TABLE IF NOT EXISTS notification_preferences (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  quiet_hours_start TEXT DEFAULT '21:00',
+  quiet_hours_end TEXT DEFAULT '05:00',
+  email_enabled INTEGER NOT NULL DEFAULT 1,
+  inapp_enabled INTEGER NOT NULL DEFAULT 1,
+  UNIQUE(user_id)
+);
+
+-- 23. Invitations
+CREATE TABLE IF NOT EXISTS invitations (
+  id TEXT PRIMARY KEY,
+  school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+  token TEXT UNIQUE NOT NULL,
+  email TEXT NOT NULL,
+  role TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  created_at TEXT NOT NULL
+);
+
+-- 24. Consents
+CREATE TABLE IF NOT EXISTS consents (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  policy_version TEXT NOT NULL DEFAULT '1.0',
+  agreed_at TEXT NOT NULL
+);
+
+-- 25. Audit Logs (Pencatatan Perubahan Sensitif & Checklist)
 CREATE TABLE IF NOT EXISTS audit_logs (
   id TEXT PRIMARY KEY,
-  school_id TEXT REFERENCES schools(id) ON DELETE CASCADE,
-  actor_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  school_id TEXT,
+  actor_user_id TEXT,
   action TEXT NOT NULL,
   entity_type TEXT NOT NULL,
   entity_id TEXT,
-  before_data TEXT,
-  after_data TEXT,
-  ip_address TEXT,
-  user_agent TEXT,
+  before_json TEXT,
+  after_json TEXT,
+  ip_hash TEXT,
   created_at TEXT NOT NULL
 );
 
--- DATA TABEL: schools (1 records)
+-- 26. Reports (Metadata Laporan yang Dibuat)
+CREATE TABLE IF NOT EXISTS reports (
+  id TEXT PRIMARY KEY,
+  school_id TEXT NOT NULL,
+  child_id TEXT,
+  class_id TEXT,
+  report_type TEXT NOT NULL,
+  period_start TEXT NOT NULL,
+  period_end TEXT NOT NULL,
+  summary_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+-- =============================================================================
+-- Indeks Minimum (PRD Bab 9.4 & Performa)
+-- =============================================================================
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
+CREATE INDEX IF NOT EXISTS idx_children_school_status ON children(school_id, status);
+CREATE INDEX IF NOT EXISTS idx_classes_teacher ON classes(teacher_id);
+CREATE INDEX IF NOT EXISTS idx_student_class_links_class ON student_class_links(class_id, status);
+CREATE INDEX IF NOT EXISTS idx_checklist_child_date ON checklist_entries(child_id, entry_date);
+CREATE INDEX IF NOT EXISTS idx_checklist_school_date ON checklist_entries(school_id, entry_date);
+CREATE INDEX IF NOT EXISTS idx_messages_thread_sent ON messages(thread_id, sent_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, read_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_school_created ON audit_logs(school_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_email_verifications_email ON email_verifications(email);
+
+-- DATA: schools (1 rows)
 INSERT INTO schools (id, name, code, timezone, status, settings_json, created_at, updated_at, logo_url)
 VALUES
   ('sch-sd-islam-01', 'SDN 3 Sumur Putri', 'SIS-001', 'Asia/Jakarta', 'active', '{}', '2026-09-17T05:16:22.742Z', '2026-09-17T12:30:26.098Z', NULL)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
--- DATA TABEL: users (54 records)
+-- DATA: users (54 rows)
 INSERT INTO users (id, email, phone, password_hash, full_name, avatar_url, status, last_login_at, created_at, updated_at)
 VALUES
-  ('user-teacher-andi', 'andi@sekolah.sch.id', '081234567890', 'bd5b65674277d8db40ebf222850afb2d:b7c71066d511a7a9445d6f3241a859a706ab7c9e8737ebf7f54d1db00c8d91401fe0337e186e6d16d6a30a2d12850c32c6b07f709c1bf6cd66b49f9b95ba3a1e', 'Pak Andi', NULL, 'active', '2026-09-17T14:12:05.564Z', '2026-09-17T05:16:22.742Z', '2026-09-17T12:30:26.098Z'),
+  ('user-teacher-andi', 'andi@sekolah.sch.id', '081234567890', 'bd5b65674277d8db40ebf222850afb2d:b7c71066d511a7a9445d6f3241a859a706ab7c9e8737ebf7f54d1db00c8d91401fe0337e186e6d16d6a30a2d12850c32c6b07f709c1bf6cd66b49f9b95ba3a1e', 'Pak Andi', NULL, 'active', '2026-09-17T15:00:03.356Z', '2026-09-17T05:16:22.742Z', '2026-09-17T14:53:46.503Z'),
   ('user-parent-rina', 'rina@keluarga.id', '081298765432', '95046dfdd1bc2a5e62716adcb5b52791:c93cf2833cca6c6df2ba9a323ef3b69ae0f35fa2f6cb3e6518778ee25a5d8f9cc0f7a60cd811c7502c5b5309703f63f5fe76e09d63e014dee35a6d1abd2ba79b', 'Bunda Rina', NULL, 'active', '2026-09-17T07:18:48.464Z', '2026-09-17T05:16:22.742Z', '2026-09-17T06:44:26.575Z'),
   ('user-admin-sekolah', 'admin@sekolah.sch.id', '081111222333', 'bd5b65674277d8db40ebf222850afb2d:b7c71066d511a7a9445d6f3241a859a706ab7c9e8737ebf7f54d1db00c8d91401fe0337e186e6d16d6a30a2d12850c32c6b07f709c1bf6cd66b49f9b95ba3a1e', 'Admin Sekolah', NULL, 'active', NULL, '2026-09-17T05:16:22.742Z', '2026-09-17T05:16:22.742Z'),
   ('user-prn-56ccf264', 'fatimah@test.id', '081233445566', 'a553751b4312eee7215b5b84eff52926:a866c843c0dd1b3b4b24657c0a3a595ffbc5313ae452a4b6527f51a0149ee015dbe145ea926624b9afb58563bf0a9bca1f4b6d858cefa1c7f8366aa46ad4f0bb', 'Ibu Fatimah', NULL, 'active', NULL, '2026-09-17T06:37:23.786Z', '2026-09-17T06:37:23.786Z'),
@@ -254,9 +406,9 @@ VALUES
   ('user-parent-48', 'ortu.rafisqi@keluarga.id', '08120000048', '28b704d8357ff0e899a39dd50b8cb78b:9785e68f43691ab5e9ca7d2ce1f832991b077e71feef24be8d8e004fcf7d291aae45b1929ffb56f9689f86f1bcace24f0611e12e87c826deaa1f3418c8e4957e', 'Bapak Kurniawan', NULL, 'active', NULL, '2026-09-17T12:23:09.090Z', '2026-09-17T12:30:26.098Z'),
   ('user-parent-49', 'ortu.ghibran@keluarga.id', '08120000049', '28b704d8357ff0e899a39dd50b8cb78b:9785e68f43691ab5e9ca7d2ce1f832991b077e71feef24be8d8e004fcf7d291aae45b1929ffb56f9689f86f1bcace24f0611e12e87c826deaa1f3418c8e4957e', 'Bapak Fadillah', NULL, 'active', NULL, '2026-09-17T12:23:09.090Z', '2026-09-17T12:30:26.098Z'),
   ('user-parent-50', 'ortu.arjuna@keluarga.id', '08120000050', '28b704d8357ff0e899a39dd50b8cb78b:9785e68f43691ab5e9ca7d2ce1f832991b077e71feef24be8d8e004fcf7d291aae45b1929ffb56f9689f86f1bcace24f0611e12e87c826deaa1f3418c8e4957e', 'Bapak Pandu', NULL, 'active', NULL, '2026-09-17T12:23:09.090Z', '2026-09-17T12:30:26.098Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
--- DATA TABEL: user_roles (54 records)
+-- DATA: user_roles (54 rows)
 INSERT INTO user_roles (id, user_id, school_id, role, created_at)
 VALUES
   ('role-teacher-1', 'user-teacher-andi', 'sch-sd-islam-01', 'teacher', '2026-09-17T05:16:22.742Z'),
@@ -313,17 +465,17 @@ VALUES
   ('role-prn-48', 'user-parent-48', 'sch-sd-islam-01', 'parent', '2026-09-17T12:23:09.090Z'),
   ('role-prn-49', 'user-parent-49', 'sch-sd-islam-01', 'parent', '2026-09-17T12:23:09.090Z'),
   ('role-prn-50', 'user-parent-50', 'sch-sd-islam-01', 'parent', '2026-09-17T12:23:09.090Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
--- DATA TABEL: classes (3 records)
+-- DATA: classes (3 rows)
 INSERT INTO classes (id, school_id, teacher_id, name, grade_level, academic_year, status, created_at, updated_at)
 VALUES
   ('class-4a', 'sch-sd-islam-01', 'user-teacher-andi', 'Kelas 4A', 'Kelas 4 SD', '2025/2026', 'active', '2026-09-17T05:16:22.742Z', '2026-09-17T05:16:22.742Z'),
   ('class-1a', 'sch-sd-islam-01', 'user-teacher-andi', 'Kelas 1A', 'Kelas 1 SD', '2025/2026', 'active', '2026-09-17T12:23:09.090Z', '2026-09-17T12:30:26.098Z'),
   ('class-2a', 'sch-sd-islam-01', 'user-teacher-andi', 'Kelas 2A', 'Kelas 2 SD', '2025/2026', 'active', '2026-09-17T12:23:09.090Z', '2026-09-17T12:30:26.098Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
--- DATA TABEL: children (57 records)
+-- DATA: children (57 rows)
 INSERT INTO children (id, school_id, full_name, preferred_name, birth_date, grade_level, gender, status, created_at, updated_at, avatar_url)
 VALUES
   ('child-ahmad', 'sch-sd-islam-01', 'Ahmad Fauzan', 'Ahmad', NULL, 'Kelas 4 SD', NULL, 'active', '2026-09-17T05:16:22.742Z', '2026-09-17T05:16:22.742Z', NULL),
@@ -383,9 +535,9 @@ VALUES
   ('child-48', 'sch-sd-islam-01', 'Arfan Rafisqi Kurniawan', 'Rafisqi', NULL, 'Kelas 2 SD', 'M', 'active', '2026-09-17T12:23:09.090Z', '2026-09-17T12:30:26.098Z', NULL),
   ('child-49', 'sch-sd-islam-01', 'ARIZAL GHIBRAN FADILLAH', 'Ghibran', NULL, 'Kelas 2 SD', 'M', 'active', '2026-09-17T12:23:09.090Z', '2026-09-17T12:30:26.098Z', NULL),
   ('child-50', 'sch-sd-islam-01', 'ARJUNA', 'Arjuna', NULL, 'Kelas 2 SD', 'M', 'active', '2026-09-17T12:23:09.090Z', '2026-09-17T12:30:26.098Z', NULL)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
--- DATA TABEL: student_class_links (57 records)
+-- DATA: student_class_links (57 rows)
 INSERT INTO student_class_links (id, child_id, class_id, status, created_at)
 VALUES
   ('scl-child-ahmad', 'child-ahmad', 'class-4a', 'active', '2026-09-17T05:16:22.742Z'),
@@ -445,17 +597,17 @@ VALUES
   ('scl-child-48', 'child-48', 'class-2a', 'active', '2026-09-17T12:23:09.090Z'),
   ('scl-child-49', 'child-49', 'class-2a', 'active', '2026-09-17T12:23:09.090Z'),
   ('scl-child-50', 'child-50', 'class-2a', 'active', '2026-09-17T12:23:09.090Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
--- DATA TABEL: teacher_class_links (3 records)
+-- DATA: teacher_class_links (3 rows)
 INSERT INTO teacher_class_links (id, teacher_user_id, class_id, is_homeroom, created_at)
 VALUES
   ('tcl-1', 'user-teacher-andi', 'class-4a', 1, '2026-09-17T05:16:22.742Z'),
   ('tcl-class-1a', 'user-teacher-andi', 'class-1a', 1, '2026-09-17T12:23:09.090Z'),
   ('tcl-class-2a', 'user-teacher-andi', 'class-2a', 1, '2026-09-17T12:23:09.090Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
--- DATA TABEL: parent_child_links (52 records)
+-- DATA: parent_child_links (52 rows)
 INSERT INTO parent_child_links (id, parent_user_id, child_id, relationship, created_at)
 VALUES
   ('pcl-child-ahmad', 'user-parent-rina', 'child-ahmad', 'mother', '2026-09-17T05:16:22.742Z'),
@@ -510,15 +662,15 @@ VALUES
   ('pcl-child-48', 'user-parent-48', 'child-48', 'parent', '2026-09-17T12:23:09.090Z'),
   ('pcl-child-49', 'user-parent-49', 'child-49', 'parent', '2026-09-17T12:23:09.090Z'),
   ('pcl-child-50', 'user-parent-50', 'child-50', 'parent', '2026-09-17T12:23:09.090Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
--- DATA TABEL: habit_templates (1 records)
+-- DATA: habit_templates (1 rows)
 INSERT INTO habit_templates (id, school_id, name, description, is_default, created_at, updated_at)
 VALUES
   ('tmpl-standar-sd', 'sch-sd-islam-01', 'Standar Ibadah & Kebiasaan Baik', 'Kurikulum pembiasaan dasar siswa SD', 1, '2026-09-17T05:16:22.742Z', '2026-09-17T05:16:22.742Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
--- DATA TABEL: habit_template_items (8 records)
+-- DATA: habit_template_items (8 rows)
 INSERT INTO habit_template_items (id, school_id, template_id, category, name, description, icon_key, sort_order, is_active, created_at, updated_at)
 VALUES
   ('fajr', 'sch-sd-islam-01', 'tmpl-standar-sd', 'ibadah_wajib', 'Shalat Subuh', NULL, 'Sun', 1, 1, '2026-09-17T05:16:22.742Z', '2026-09-17T12:30:26.098Z'),
@@ -529,9 +681,14 @@ VALUES
   ('isha', 'sch-sd-islam-01', 'tmpl-standar-sd', 'ibadah_wajib', 'Shalat Isya', NULL, 'Moon', 6, 1, '2026-09-17T05:16:22.742Z', '2026-09-17T12:30:26.098Z'),
   ('kindness', 'sch-sd-islam-01', 'tmpl-standar-sd', 'kebiasaan_baik', 'Kebaikan Hari Ini', 'Membantu orang tua & sesama', 'Heart', 7, 1, '2026-09-17T05:16:22.742Z', '2026-09-17T12:30:26.098Z'),
   ('dua', 'sch-sd-islam-01', 'tmpl-standar-sd', 'ibadah_harian', 'Doa sebelum tidur', NULL, 'Star', 8, 1, '2026-09-17T05:16:22.742Z', '2026-09-17T12:30:26.098Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
--- DATA TABEL: checklist_entries (19200 records)
+
+-- =============================================================================
+-- BAGIAN 2 DARI 4: RIWAYAT CEKLIS PEKAN 1 & 2 (4 AGUSTUS - 17 AGUSTUS 2026)
+-- =============================================================================
+
+-- DATA: checklist_entries (5600 rows)
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
   ('chk-2026-08-04-dhuhr-child-11', 'sch-sd-islam-01', 'child-11', 'dhuhr', '2026-08-04', 'completed', 'user-parent-11', '2026-08-04T19:30:00.000Z', 'parent', 1, '2026-08-04T19:30:00.000Z', '2026-08-04T19:30:00.000Z'),
@@ -634,7 +791,7 @@ VALUES
   ('chk-2026-08-04-kindness-child-10', 'sch-sd-islam-01', 'child-10', 'kindness', '2026-08-04', 'completed', 'user-parent-10', '2026-08-04T19:30:00.000Z', 'parent', 1, '2026-08-04T19:30:00.000Z', '2026-08-04T19:30:00.000Z'),
   ('chk-2026-08-04-dua-child-18', 'sch-sd-islam-01', 'child-18', 'dua', '2026-08-04', 'completed', 'user-parent-18', '2026-08-04T19:30:00.000Z', 'parent', 1, '2026-08-04T19:30:00.000Z', '2026-08-04T19:30:00.000Z'),
   ('chk-2026-08-04-asr-child-15', 'sch-sd-islam-01', 'child-15', 'asr', '2026-08-04', 'completed', 'user-parent-15', '2026-08-04T19:30:00.000Z', 'parent', 1, '2026-08-04T19:30:00.000Z', '2026-08-04T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -738,7 +895,7 @@ VALUES
   ('chk-2026-08-04-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-08-04', 'not_completed', 'user-parent-13', '2026-08-04T19:30:00.000Z', 'parent', 1, '2026-08-04T19:30:00.000Z', '2026-08-04T19:30:00.000Z'),
   ('chk-2026-08-04-kindness-child-09', 'sch-sd-islam-01', 'child-09', 'kindness', '2026-08-04', 'not_reported', 'user-parent-09', '2026-08-04T19:30:00.000Z', 'parent', 1, '2026-08-04T19:30:00.000Z', '2026-08-04T19:30:00.000Z'),
   ('chk-2026-08-04-dua-child-09', 'sch-sd-islam-01', 'child-09', 'dua', '2026-08-04', 'not_completed', 'user-parent-09', '2026-08-04T19:30:00.000Z', 'parent', 1, '2026-08-04T19:30:00.000Z', '2026-08-04T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -842,7 +999,7 @@ VALUES
   ('chk-2026-08-04-dhuhr-child-50', 'sch-sd-islam-01', 'child-50', 'dhuhr', '2026-08-04', 'completed', 'user-parent-50', '2026-08-04T19:30:00.000Z', 'parent', 1, '2026-08-04T19:30:00.000Z', '2026-08-04T19:30:00.000Z'),
   ('chk-2026-08-04-fajr-child-47', 'sch-sd-islam-01', 'child-47', 'fajr', '2026-08-04', 'completed', 'user-parent-47', '2026-08-04T19:30:00.000Z', 'parent', 1, '2026-08-04T19:30:00.000Z', '2026-08-04T19:30:00.000Z'),
   ('chk-2026-08-04-asr-child-27', 'sch-sd-islam-01', 'child-27', 'asr', '2026-08-04', 'completed', 'user-parent-27', '2026-08-04T19:30:00.000Z', 'parent', 1, '2026-08-04T19:30:00.000Z', '2026-08-04T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -946,7 +1103,7 @@ VALUES
   ('chk-2026-08-04-kindness-child-44', 'sch-sd-islam-01', 'child-44', 'kindness', '2026-08-04', 'not_completed', 'user-parent-44', '2026-08-04T19:30:00.000Z', 'parent', 1, '2026-08-04T19:30:00.000Z', '2026-08-04T19:30:00.000Z'),
   ('chk-2026-08-04-dua-child-37', 'sch-sd-islam-01', 'child-37', 'dua', '2026-08-04', 'not_completed', 'user-parent-37', '2026-08-04T19:30:00.000Z', 'parent', 1, '2026-08-04T19:30:00.000Z', '2026-08-04T19:30:00.000Z'),
   ('chk-2026-08-04-quran-child-28', 'sch-sd-islam-01', 'child-28', 'quran', '2026-08-04', 'not_completed', 'user-parent-28', '2026-08-04T19:30:00.000Z', 'parent', 1, '2026-08-04T19:30:00.000Z', '2026-08-04T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -1050,7 +1207,7 @@ VALUES
   ('chk-2026-08-05-maghrib-child-01', 'sch-sd-islam-01', 'child-01', 'maghrib', '2026-08-05', 'completed', 'user-parent-01', '2026-08-05T19:30:00.000Z', 'parent', 1, '2026-08-05T19:30:00.000Z', '2026-08-05T19:30:00.000Z'),
   ('chk-2026-08-05-fajr-child-05', 'sch-sd-islam-01', 'child-05', 'fajr', '2026-08-05', 'completed', 'user-parent-05', '2026-08-05T19:30:00.000Z', 'parent', 1, '2026-08-05T19:30:00.000Z', '2026-08-05T19:30:00.000Z'),
   ('chk-2026-08-05-isha-child-09', 'sch-sd-islam-01', 'child-09', 'isha', '2026-08-05', 'completed', 'user-parent-09', '2026-08-05T19:30:00.000Z', 'parent', 1, '2026-08-05T19:30:00.000Z', '2026-08-05T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -1154,7 +1311,7 @@ VALUES
   ('chk-2026-08-05-dua-child-07', 'sch-sd-islam-01', 'child-07', 'dua', '2026-08-05', 'not_completed', 'user-parent-07', '2026-08-05T19:30:00.000Z', 'parent', 1, '2026-08-05T19:30:00.000Z', '2026-08-05T19:30:00.000Z'),
   ('chk-2026-08-05-dua-child-09', 'sch-sd-islam-01', 'child-09', 'dua', '2026-08-05', 'not_reported', 'user-parent-09', '2026-08-05T19:30:00.000Z', 'parent', 1, '2026-08-05T19:30:00.000Z', '2026-08-05T19:30:00.000Z'),
   ('chk-2026-08-05-kindness-child-05', 'sch-sd-islam-01', 'child-05', 'kindness', '2026-08-05', 'not_completed', 'user-parent-05', '2026-08-05T19:30:00.000Z', 'parent', 1, '2026-08-05T19:30:00.000Z', '2026-08-05T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -1258,7 +1415,7 @@ VALUES
   ('chk-2026-08-05-kindness-child-26', 'sch-sd-islam-01', 'child-26', 'kindness', '2026-08-05', 'completed', 'user-parent-26', '2026-08-05T19:30:00.000Z', 'parent', 1, '2026-08-05T19:30:00.000Z', '2026-08-05T19:30:00.000Z'),
   ('chk-2026-08-05-quran-child-45', 'sch-sd-islam-01', 'child-45', 'quran', '2026-08-05', 'completed', 'user-parent-45', '2026-08-05T19:30:00.000Z', 'parent', 1, '2026-08-05T19:30:00.000Z', '2026-08-05T19:30:00.000Z'),
   ('chk-2026-08-05-fajr-child-36', 'sch-sd-islam-01', 'child-36', 'fajr', '2026-08-05', 'completed', 'user-parent-36', '2026-08-05T19:30:00.000Z', 'parent', 1, '2026-08-05T19:30:00.000Z', '2026-08-05T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -1362,7 +1519,7 @@ VALUES
   ('chk-2026-08-05-dua-child-45', 'sch-sd-islam-01', 'child-45', 'dua', '2026-08-05', 'not_completed', 'user-parent-45', '2026-08-05T19:30:00.000Z', 'parent', 1, '2026-08-05T19:30:00.000Z', '2026-08-05T19:30:00.000Z'),
   ('chk-2026-08-05-dua-child-28', 'sch-sd-islam-01', 'child-28', 'dua', '2026-08-05', 'not_completed', 'user-parent-28', '2026-08-05T19:30:00.000Z', 'parent', 1, '2026-08-05T19:30:00.000Z', '2026-08-05T19:30:00.000Z'),
   ('chk-2026-08-05-dua-child-50', 'sch-sd-islam-01', 'child-50', 'dua', '2026-08-05', 'not_completed', 'user-parent-50', '2026-08-05T19:30:00.000Z', 'parent', 1, '2026-08-05T19:30:00.000Z', '2026-08-05T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -1466,7 +1623,7 @@ VALUES
   ('chk-2026-08-06-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-08-06', 'completed', 'user-parent-13', '2026-08-06T19:30:00.000Z', 'parent', 1, '2026-08-06T19:30:00.000Z', '2026-08-06T19:30:00.000Z'),
   ('chk-2026-08-06-fajr-child-08', 'sch-sd-islam-01', 'child-08', 'fajr', '2026-08-06', 'completed', 'user-parent-08', '2026-08-06T19:30:00.000Z', 'parent', 1, '2026-08-06T19:30:00.000Z', '2026-08-06T19:30:00.000Z'),
   ('chk-2026-08-06-maghrib-child-11', 'sch-sd-islam-01', 'child-11', 'maghrib', '2026-08-06', 'completed', 'user-parent-11', '2026-08-06T19:30:00.000Z', 'parent', 1, '2026-08-06T19:30:00.000Z', '2026-08-06T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -1570,7 +1727,7 @@ VALUES
   ('chk-2026-08-06-quran-child-09', 'sch-sd-islam-01', 'child-09', 'quran', '2026-08-06', 'not_reported', 'user-parent-09', '2026-08-06T19:30:00.000Z', 'parent', 1, '2026-08-06T19:30:00.000Z', '2026-08-06T19:30:00.000Z'),
   ('chk-2026-08-06-quran-child-05', 'sch-sd-islam-01', 'child-05', 'quran', '2026-08-06', 'not_completed', 'user-parent-05', '2026-08-06T19:30:00.000Z', 'parent', 1, '2026-08-06T19:30:00.000Z', '2026-08-06T19:30:00.000Z'),
   ('chk-2026-08-06-dua-child-22', 'sch-sd-islam-01', 'child-22', 'dua', '2026-08-06', 'not_reported', 'user-parent-22', '2026-08-06T19:30:00.000Z', 'parent', 1, '2026-08-06T19:30:00.000Z', '2026-08-06T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -1674,7 +1831,7 @@ VALUES
   ('chk-2026-08-06-maghrib-child-36', 'sch-sd-islam-01', 'child-36', 'maghrib', '2026-08-06', 'completed', 'user-parent-36', '2026-08-06T19:30:00.000Z', 'parent', 1, '2026-08-06T19:30:00.000Z', '2026-08-06T19:30:00.000Z'),
   ('chk-2026-08-06-asr-child-27', 'sch-sd-islam-01', 'child-27', 'asr', '2026-08-06', 'completed', 'user-parent-27', '2026-08-06T19:30:00.000Z', 'parent', 1, '2026-08-06T19:30:00.000Z', '2026-08-06T19:30:00.000Z'),
   ('chk-2026-08-06-isha-child-30', 'sch-sd-islam-01', 'child-30', 'isha', '2026-08-06', 'completed', 'user-parent-30', '2026-08-06T19:30:00.000Z', 'parent', 1, '2026-08-06T19:30:00.000Z', '2026-08-06T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -1778,7 +1935,7 @@ VALUES
   ('chk-2026-08-06-dua-child-49', 'sch-sd-islam-01', 'child-49', 'dua', '2026-08-06', 'not_completed', 'user-parent-49', '2026-08-06T19:30:00.000Z', 'parent', 1, '2026-08-06T19:30:00.000Z', '2026-08-06T19:30:00.000Z'),
   ('chk-2026-08-06-quran-child-49', 'sch-sd-islam-01', 'child-49', 'quran', '2026-08-06', 'not_completed', 'user-parent-49', '2026-08-06T19:30:00.000Z', 'parent', 1, '2026-08-06T19:30:00.000Z', '2026-08-06T19:30:00.000Z'),
   ('chk-2026-08-06-dua-child-44', 'sch-sd-islam-01', 'child-44', 'dua', '2026-08-06', 'not_completed', 'user-parent-44', '2026-08-06T19:30:00.000Z', 'parent', 1, '2026-08-06T19:30:00.000Z', '2026-08-06T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -1882,7 +2039,7 @@ VALUES
   ('chk-2026-08-07-fajr-child-22', 'sch-sd-islam-01', 'child-22', 'fajr', '2026-08-07', 'completed', 'user-parent-22', '2026-08-07T19:30:00.000Z', 'parent', 1, '2026-08-07T19:30:00.000Z', '2026-08-07T19:30:00.000Z'),
   ('chk-2026-08-07-dua-child-12', 'sch-sd-islam-01', 'child-12', 'dua', '2026-08-07', 'completed', 'user-parent-12', '2026-08-07T19:30:00.000Z', 'parent', 1, '2026-08-07T19:30:00.000Z', '2026-08-07T19:30:00.000Z'),
   ('chk-2026-08-07-asr-child-03', 'sch-sd-islam-01', 'child-03', 'asr', '2026-08-07', 'completed', 'user-parent-03', '2026-08-07T19:30:00.000Z', 'parent', 1, '2026-08-07T19:30:00.000Z', '2026-08-07T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -1986,7 +2143,7 @@ VALUES
   ('chk-2026-08-07-kindness-child-17', 'sch-sd-islam-01', 'child-17', 'kindness', '2026-08-07', 'not_completed', 'user-parent-17', '2026-08-07T19:30:00.000Z', 'parent', 1, '2026-08-07T19:30:00.000Z', '2026-08-07T19:30:00.000Z'),
   ('chk-2026-08-07-fajr-child-05', 'sch-sd-islam-01', 'child-05', 'fajr', '2026-08-07', 'not_completed', 'user-parent-05', '2026-08-07T19:30:00.000Z', 'parent', 1, '2026-08-07T19:30:00.000Z', '2026-08-07T19:30:00.000Z'),
   ('chk-2026-08-07-dua-child-18', 'sch-sd-islam-01', 'child-18', 'dua', '2026-08-07', 'not_completed', 'user-parent-18', '2026-08-07T19:30:00.000Z', 'parent', 1, '2026-08-07T19:30:00.000Z', '2026-08-07T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -2090,7 +2247,7 @@ VALUES
   ('chk-2026-08-07-dua-child-37', 'sch-sd-islam-01', 'child-37', 'dua', '2026-08-07', 'completed', 'user-parent-37', '2026-08-07T19:30:00.000Z', 'parent', 1, '2026-08-07T19:30:00.000Z', '2026-08-07T19:30:00.000Z'),
   ('chk-2026-08-07-asr-child-37', 'sch-sd-islam-01', 'child-37', 'asr', '2026-08-07', 'completed', 'user-parent-37', '2026-08-07T19:30:00.000Z', 'parent', 1, '2026-08-07T19:30:00.000Z', '2026-08-07T19:30:00.000Z'),
   ('chk-2026-08-07-isha-child-26', 'sch-sd-islam-01', 'child-26', 'isha', '2026-08-07', 'completed', 'user-parent-26', '2026-08-07T19:30:00.000Z', 'parent', 1, '2026-08-07T19:30:00.000Z', '2026-08-07T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -2194,7 +2351,7 @@ VALUES
   ('chk-2026-08-07-quran-child-27', 'sch-sd-islam-01', 'child-27', 'quran', '2026-08-07', 'not_completed', 'user-parent-27', '2026-08-07T19:30:00.000Z', 'parent', 1, '2026-08-07T19:30:00.000Z', '2026-08-07T19:30:00.000Z'),
   ('chk-2026-08-07-kindness-child-41', 'sch-sd-islam-01', 'child-41', 'kindness', '2026-08-07', 'not_completed', 'user-parent-41', '2026-08-07T19:30:00.000Z', 'parent', 1, '2026-08-07T19:30:00.000Z', '2026-08-07T19:30:00.000Z'),
   ('chk-2026-08-07-kindness-child-49', 'sch-sd-islam-01', 'child-49', 'kindness', '2026-08-07', 'not_completed', 'user-parent-49', '2026-08-07T19:30:00.000Z', 'parent', 1, '2026-08-07T19:30:00.000Z', '2026-08-07T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -2298,7 +2455,7 @@ VALUES
   ('chk-2026-08-08-dhuhr-child-02', 'sch-sd-islam-01', 'child-02', 'dhuhr', '2026-08-08', 'completed', 'user-parent-02', '2026-08-08T19:30:00.000Z', 'parent', 1, '2026-08-08T19:30:00.000Z', '2026-08-08T19:30:00.000Z'),
   ('chk-2026-08-08-maghrib-child-13', 'sch-sd-islam-01', 'child-13', 'maghrib', '2026-08-08', 'completed', 'user-parent-13', '2026-08-08T19:30:00.000Z', 'parent', 1, '2026-08-08T19:30:00.000Z', '2026-08-08T19:30:00.000Z'),
   ('chk-2026-08-08-maghrib-child-24', 'sch-sd-islam-01', 'child-24', 'maghrib', '2026-08-08', 'completed', 'user-parent-24', '2026-08-08T19:30:00.000Z', 'parent', 1, '2026-08-08T19:30:00.000Z', '2026-08-08T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -2402,7 +2559,7 @@ VALUES
   ('chk-2026-08-08-dua-child-22', 'sch-sd-islam-01', 'child-22', 'dua', '2026-08-08', 'not_reported', 'user-parent-22', '2026-08-08T19:30:00.000Z', 'parent', 1, '2026-08-08T19:30:00.000Z', '2026-08-08T19:30:00.000Z'),
   ('chk-2026-08-08-dua-child-25', 'sch-sd-islam-01', 'child-25', 'dua', '2026-08-08', 'not_completed', 'user-parent-25', '2026-08-08T19:30:00.000Z', 'parent', 1, '2026-08-08T19:30:00.000Z', '2026-08-08T19:30:00.000Z'),
   ('chk-2026-08-08-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-08-08', 'not_completed', 'user-parent-13', '2026-08-08T19:30:00.000Z', 'parent', 1, '2026-08-08T19:30:00.000Z', '2026-08-08T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -2506,7 +2663,7 @@ VALUES
   ('chk-2026-08-08-kindness-child-42', 'sch-sd-islam-01', 'child-42', 'kindness', '2026-08-08', 'completed', 'user-parent-42', '2026-08-08T19:30:00.000Z', 'parent', 1, '2026-08-08T19:30:00.000Z', '2026-08-08T19:30:00.000Z'),
   ('chk-2026-08-08-dua-child-48', 'sch-sd-islam-01', 'child-48', 'dua', '2026-08-08', 'completed', 'user-parent-48', '2026-08-08T19:30:00.000Z', 'parent', 1, '2026-08-08T19:30:00.000Z', '2026-08-08T19:30:00.000Z'),
   ('chk-2026-08-08-asr-child-30', 'sch-sd-islam-01', 'child-30', 'asr', '2026-08-08', 'completed', 'user-parent-30', '2026-08-08T19:30:00.000Z', 'parent', 1, '2026-08-08T19:30:00.000Z', '2026-08-08T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -2610,7 +2767,7 @@ VALUES
   ('chk-2026-08-08-quran-child-45', 'sch-sd-islam-01', 'child-45', 'quran', '2026-08-08', 'not_completed', 'user-parent-45', '2026-08-08T19:30:00.000Z', 'parent', 1, '2026-08-08T19:30:00.000Z', '2026-08-08T19:30:00.000Z'),
   ('chk-2026-08-08-dua-child-44', 'sch-sd-islam-01', 'child-44', 'dua', '2026-08-08', 'not_completed', 'user-parent-44', '2026-08-08T19:30:00.000Z', 'parent', 1, '2026-08-08T19:30:00.000Z', '2026-08-08T19:30:00.000Z'),
   ('chk-2026-08-08-isha-child-50', 'sch-sd-islam-01', 'child-50', 'isha', '2026-08-08', 'not_reported', 'user-parent-50', '2026-08-08T19:30:00.000Z', 'parent', 1, '2026-08-08T19:30:00.000Z', '2026-08-08T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -2714,7 +2871,7 @@ VALUES
   ('chk-2026-08-09-fajr-child-16', 'sch-sd-islam-01', 'child-16', 'fajr', '2026-08-09', 'completed', 'user-parent-16', '2026-08-09T19:30:00.000Z', 'parent', 1, '2026-08-09T19:30:00.000Z', '2026-08-09T19:30:00.000Z'),
   ('chk-2026-08-09-maghrib-child-09', 'sch-sd-islam-01', 'child-09', 'maghrib', '2026-08-09', 'completed', 'user-parent-09', '2026-08-09T19:30:00.000Z', 'parent', 1, '2026-08-09T19:30:00.000Z', '2026-08-09T19:30:00.000Z'),
   ('chk-2026-08-09-dhuhr-child-19', 'sch-sd-islam-01', 'child-19', 'dhuhr', '2026-08-09', 'completed', 'user-parent-19', '2026-08-09T19:30:00.000Z', 'parent', 1, '2026-08-09T19:30:00.000Z', '2026-08-09T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -2818,7 +2975,7 @@ VALUES
   ('chk-2026-08-09-kindness-child-05', 'sch-sd-islam-01', 'child-05', 'kindness', '2026-08-09', 'not_completed', 'user-parent-05', '2026-08-09T19:30:00.000Z', 'parent', 1, '2026-08-09T19:30:00.000Z', '2026-08-09T19:30:00.000Z'),
   ('chk-2026-08-09-dua-child-09', 'sch-sd-islam-01', 'child-09', 'dua', '2026-08-09', 'not_completed', 'user-parent-09', '2026-08-09T19:30:00.000Z', 'parent', 1, '2026-08-09T19:30:00.000Z', '2026-08-09T19:30:00.000Z'),
   ('chk-2026-08-09-kindness-child-09', 'sch-sd-islam-01', 'child-09', 'kindness', '2026-08-09', 'not_completed', 'user-parent-09', '2026-08-09T19:30:00.000Z', 'parent', 1, '2026-08-09T19:30:00.000Z', '2026-08-09T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -2922,7 +3079,7 @@ VALUES
   ('chk-2026-08-09-fajr-child-31', 'sch-sd-islam-01', 'child-31', 'fajr', '2026-08-09', 'completed', 'user-parent-31', '2026-08-09T19:30:00.000Z', 'parent', 1, '2026-08-09T19:30:00.000Z', '2026-08-09T19:30:00.000Z'),
   ('chk-2026-08-09-asr-child-37', 'sch-sd-islam-01', 'child-37', 'asr', '2026-08-09', 'completed', 'user-parent-37', '2026-08-09T19:30:00.000Z', 'parent', 1, '2026-08-09T19:30:00.000Z', '2026-08-09T19:30:00.000Z'),
   ('chk-2026-08-09-asr-child-30', 'sch-sd-islam-01', 'child-30', 'asr', '2026-08-09', 'completed', 'user-parent-30', '2026-08-09T19:30:00.000Z', 'parent', 1, '2026-08-09T19:30:00.000Z', '2026-08-09T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -3026,7 +3183,7 @@ VALUES
   ('chk-2026-08-09-isha-child-49', 'sch-sd-islam-01', 'child-49', 'isha', '2026-08-09', 'not_completed', 'user-parent-49', '2026-08-09T19:30:00.000Z', 'parent', 1, '2026-08-09T19:30:00.000Z', '2026-08-09T19:30:00.000Z'),
   ('chk-2026-08-09-dua-child-49', 'sch-sd-islam-01', 'child-49', 'dua', '2026-08-09', 'not_completed', 'user-parent-49', '2026-08-09T19:30:00.000Z', 'parent', 1, '2026-08-09T19:30:00.000Z', '2026-08-09T19:30:00.000Z'),
   ('chk-2026-08-09-dua-child-37', 'sch-sd-islam-01', 'child-37', 'dua', '2026-08-09', 'not_completed', 'user-parent-37', '2026-08-09T19:30:00.000Z', 'parent', 1, '2026-08-09T19:30:00.000Z', '2026-08-09T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -3130,7 +3287,7 @@ VALUES
   ('chk-2026-08-10-fajr-child-17', 'sch-sd-islam-01', 'child-17', 'fajr', '2026-08-10', 'completed', 'user-parent-17', '2026-08-10T19:30:00.000Z', 'parent', 1, '2026-08-10T19:30:00.000Z', '2026-08-10T19:30:00.000Z'),
   ('chk-2026-08-10-asr-child-19', 'sch-sd-islam-01', 'child-19', 'asr', '2026-08-10', 'completed', 'user-parent-19', '2026-08-10T19:30:00.000Z', 'parent', 1, '2026-08-10T19:30:00.000Z', '2026-08-10T19:30:00.000Z'),
   ('chk-2026-08-10-dua-child-03', 'sch-sd-islam-01', 'child-03', 'dua', '2026-08-10', 'completed', 'user-parent-03', '2026-08-10T19:30:00.000Z', 'parent', 1, '2026-08-10T19:30:00.000Z', '2026-08-10T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -3234,7 +3391,7 @@ VALUES
   ('chk-2026-08-10-kindness-child-16', 'sch-sd-islam-01', 'child-16', 'kindness', '2026-08-10', 'not_completed', 'user-parent-16', '2026-08-10T19:30:00.000Z', 'parent', 1, '2026-08-10T19:30:00.000Z', '2026-08-10T19:30:00.000Z'),
   ('chk-2026-08-10-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-08-10', 'not_completed', 'user-parent-13', '2026-08-10T19:30:00.000Z', 'parent', 1, '2026-08-10T19:30:00.000Z', '2026-08-10T19:30:00.000Z'),
   ('chk-2026-08-10-dua-child-17', 'sch-sd-islam-01', 'child-17', 'dua', '2026-08-10', 'not_completed', 'user-parent-17', '2026-08-10T19:30:00.000Z', 'parent', 1, '2026-08-10T19:30:00.000Z', '2026-08-10T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -3338,7 +3495,7 @@ VALUES
   ('chk-2026-08-10-quran-child-31', 'sch-sd-islam-01', 'child-31', 'quran', '2026-08-10', 'completed', 'user-parent-31', '2026-08-10T19:30:00.000Z', 'parent', 1, '2026-08-10T19:30:00.000Z', '2026-08-10T19:30:00.000Z'),
   ('chk-2026-08-10-quran-child-28', 'sch-sd-islam-01', 'child-28', 'quran', '2026-08-10', 'completed', 'user-parent-28', '2026-08-10T19:30:00.000Z', 'parent', 1, '2026-08-10T19:30:00.000Z', '2026-08-10T19:30:00.000Z'),
   ('chk-2026-08-10-fajr-child-26', 'sch-sd-islam-01', 'child-26', 'fajr', '2026-08-10', 'completed', 'user-parent-26', '2026-08-10T19:30:00.000Z', 'parent', 1, '2026-08-10T19:30:00.000Z', '2026-08-10T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -3442,7 +3599,7 @@ VALUES
   ('chk-2026-08-10-kindness-child-28', 'sch-sd-islam-01', 'child-28', 'kindness', '2026-08-10', 'not_completed', 'user-parent-28', '2026-08-10T19:30:00.000Z', 'parent', 1, '2026-08-10T19:30:00.000Z', '2026-08-10T19:30:00.000Z'),
   ('chk-2026-08-10-kindness-child-44', 'sch-sd-islam-01', 'child-44', 'kindness', '2026-08-10', 'not_completed', 'user-parent-44', '2026-08-10T19:30:00.000Z', 'parent', 1, '2026-08-10T19:30:00.000Z', '2026-08-10T19:30:00.000Z'),
   ('chk-2026-08-10-dua-child-49', 'sch-sd-islam-01', 'child-49', 'dua', '2026-08-10', 'not_completed', 'user-parent-49', '2026-08-10T19:30:00.000Z', 'parent', 1, '2026-08-10T19:30:00.000Z', '2026-08-10T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -3546,7 +3703,7 @@ VALUES
   ('chk-2026-08-11-isha-child-17', 'sch-sd-islam-01', 'child-17', 'isha', '2026-08-11', 'completed', 'user-parent-17', '2026-08-11T19:30:00.000Z', 'parent', 1, '2026-08-11T19:30:00.000Z', '2026-08-11T19:30:00.000Z'),
   ('chk-2026-08-11-dua-child-16', 'sch-sd-islam-01', 'child-16', 'dua', '2026-08-11', 'completed', 'user-parent-16', '2026-08-11T19:30:00.000Z', 'parent', 1, '2026-08-11T19:30:00.000Z', '2026-08-11T19:30:00.000Z'),
   ('chk-2026-08-11-maghrib-child-05', 'sch-sd-islam-01', 'child-05', 'maghrib', '2026-08-11', 'completed', 'user-parent-05', '2026-08-11T19:30:00.000Z', 'parent', 1, '2026-08-11T19:30:00.000Z', '2026-08-11T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -3650,7 +3807,7 @@ VALUES
   ('chk-2026-08-11-dua-child-09', 'sch-sd-islam-01', 'child-09', 'dua', '2026-08-11', 'not_completed', 'user-parent-09', '2026-08-11T19:30:00.000Z', 'parent', 1, '2026-08-11T19:30:00.000Z', '2026-08-11T19:30:00.000Z'),
   ('chk-2026-08-11-quran-child-13', 'sch-sd-islam-01', 'child-13', 'quran', '2026-08-11', 'not_reported', 'user-parent-13', '2026-08-11T19:30:00.000Z', 'parent', 1, '2026-08-11T19:30:00.000Z', '2026-08-11T19:30:00.000Z'),
   ('chk-2026-08-11-dua-child-18', 'sch-sd-islam-01', 'child-18', 'dua', '2026-08-11', 'not_completed', 'user-parent-18', '2026-08-11T19:30:00.000Z', 'parent', 1, '2026-08-11T19:30:00.000Z', '2026-08-11T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -3754,7 +3911,7 @@ VALUES
   ('chk-2026-08-11-maghrib-child-43', 'sch-sd-islam-01', 'child-43', 'maghrib', '2026-08-11', 'completed', 'user-parent-43', '2026-08-11T19:30:00.000Z', 'parent', 1, '2026-08-11T19:30:00.000Z', '2026-08-11T19:30:00.000Z'),
   ('chk-2026-08-11-fajr-child-42', 'sch-sd-islam-01', 'child-42', 'fajr', '2026-08-11', 'completed', 'user-parent-42', '2026-08-11T19:30:00.000Z', 'parent', 1, '2026-08-11T19:30:00.000Z', '2026-08-11T19:30:00.000Z'),
   ('chk-2026-08-11-kindness-child-46', 'sch-sd-islam-01', 'child-46', 'kindness', '2026-08-11', 'completed', 'user-parent-46', '2026-08-11T19:30:00.000Z', 'parent', 1, '2026-08-11T19:30:00.000Z', '2026-08-11T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -3858,7 +4015,7 @@ VALUES
   ('chk-2026-08-11-kindness-child-30', 'sch-sd-islam-01', 'child-30', 'kindness', '2026-08-11', 'not_reported', 'user-parent-30', '2026-08-11T19:30:00.000Z', 'parent', 1, '2026-08-11T19:30:00.000Z', '2026-08-11T19:30:00.000Z'),
   ('chk-2026-08-11-isha-child-50', 'sch-sd-islam-01', 'child-50', 'isha', '2026-08-11', 'not_completed', 'user-parent-50', '2026-08-11T19:30:00.000Z', 'parent', 1, '2026-08-11T19:30:00.000Z', '2026-08-11T19:30:00.000Z'),
   ('chk-2026-08-11-dua-child-27', 'sch-sd-islam-01', 'child-27', 'dua', '2026-08-11', 'not_completed', 'user-parent-27', '2026-08-11T19:30:00.000Z', 'parent', 1, '2026-08-11T19:30:00.000Z', '2026-08-11T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -3962,7 +4119,7 @@ VALUES
   ('chk-2026-08-12-dua-child-20', 'sch-sd-islam-01', 'child-20', 'dua', '2026-08-12', 'completed', 'user-parent-20', '2026-08-12T19:30:00.000Z', 'parent', 1, '2026-08-12T19:30:00.000Z', '2026-08-12T19:30:00.000Z'),
   ('chk-2026-08-12-isha-child-20', 'sch-sd-islam-01', 'child-20', 'isha', '2026-08-12', 'completed', 'user-parent-20', '2026-08-12T19:30:00.000Z', 'parent', 1, '2026-08-12T19:30:00.000Z', '2026-08-12T19:30:00.000Z'),
   ('chk-2026-08-12-isha-child-12', 'sch-sd-islam-01', 'child-12', 'isha', '2026-08-12', 'completed', 'user-parent-12', '2026-08-12T19:30:00.000Z', 'parent', 1, '2026-08-12T19:30:00.000Z', '2026-08-12T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -4066,7 +4223,7 @@ VALUES
   ('chk-2026-08-12-kindness-child-09', 'sch-sd-islam-01', 'child-09', 'kindness', '2026-08-12', 'not_reported', 'user-parent-09', '2026-08-12T19:30:00.000Z', 'parent', 1, '2026-08-12T19:30:00.000Z', '2026-08-12T19:30:00.000Z'),
   ('chk-2026-08-12-dua-child-18', 'sch-sd-islam-01', 'child-18', 'dua', '2026-08-12', 'not_reported', 'user-parent-18', '2026-08-12T19:30:00.000Z', 'parent', 1, '2026-08-12T19:30:00.000Z', '2026-08-12T19:30:00.000Z'),
   ('chk-2026-08-12-kindness-child-13', 'sch-sd-islam-01', 'child-13', 'kindness', '2026-08-12', 'not_completed', 'user-parent-13', '2026-08-12T19:30:00.000Z', 'parent', 1, '2026-08-12T19:30:00.000Z', '2026-08-12T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -4170,7 +4327,7 @@ VALUES
   ('chk-2026-08-12-dua-child-37', 'sch-sd-islam-01', 'child-37', 'dua', '2026-08-12', 'completed', 'user-parent-37', '2026-08-12T19:30:00.000Z', 'parent', 1, '2026-08-12T19:30:00.000Z', '2026-08-12T19:30:00.000Z'),
   ('chk-2026-08-12-maghrib-child-35', 'sch-sd-islam-01', 'child-35', 'maghrib', '2026-08-12', 'completed', 'user-parent-35', '2026-08-12T19:30:00.000Z', 'parent', 1, '2026-08-12T19:30:00.000Z', '2026-08-12T19:30:00.000Z'),
   ('chk-2026-08-12-kindness-child-37', 'sch-sd-islam-01', 'child-37', 'kindness', '2026-08-12', 'completed', 'user-parent-37', '2026-08-12T19:30:00.000Z', 'parent', 1, '2026-08-12T19:30:00.000Z', '2026-08-12T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -4274,7 +4431,7 @@ VALUES
   ('chk-2026-08-12-quran-child-28', 'sch-sd-islam-01', 'child-28', 'quran', '2026-08-12', 'not_completed', 'user-parent-28', '2026-08-12T19:30:00.000Z', 'parent', 1, '2026-08-12T19:30:00.000Z', '2026-08-12T19:30:00.000Z'),
   ('chk-2026-08-12-dua-child-49', 'sch-sd-islam-01', 'child-49', 'dua', '2026-08-12', 'not_completed', 'user-parent-49', '2026-08-12T19:30:00.000Z', 'parent', 1, '2026-08-12T19:30:00.000Z', '2026-08-12T19:30:00.000Z'),
   ('chk-2026-08-12-dua-child-27', 'sch-sd-islam-01', 'child-27', 'dua', '2026-08-12', 'not_completed', 'user-parent-27', '2026-08-12T19:30:00.000Z', 'parent', 1, '2026-08-12T19:30:00.000Z', '2026-08-12T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -4378,7 +4535,7 @@ VALUES
   ('chk-2026-08-13-isha-child-24', 'sch-sd-islam-01', 'child-24', 'isha', '2026-08-13', 'completed', 'user-parent-24', '2026-08-13T19:30:00.000Z', 'parent', 1, '2026-08-13T19:30:00.000Z', '2026-08-13T19:30:00.000Z'),
   ('chk-2026-08-13-quran-child-18', 'sch-sd-islam-01', 'child-18', 'quran', '2026-08-13', 'completed', 'user-parent-18', '2026-08-13T19:30:00.000Z', 'parent', 1, '2026-08-13T19:30:00.000Z', '2026-08-13T19:30:00.000Z'),
   ('chk-2026-08-13-dua-child-19', 'sch-sd-islam-01', 'child-19', 'dua', '2026-08-13', 'completed', 'user-parent-19', '2026-08-13T19:30:00.000Z', 'parent', 1, '2026-08-13T19:30:00.000Z', '2026-08-13T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -4482,7 +4639,7 @@ VALUES
   ('chk-2026-08-13-kindness-child-25', 'sch-sd-islam-01', 'child-25', 'kindness', '2026-08-13', 'not_completed', 'user-parent-25', '2026-08-13T19:30:00.000Z', 'parent', 1, '2026-08-13T19:30:00.000Z', '2026-08-13T19:30:00.000Z'),
   ('chk-2026-08-13-dua-child-17', 'sch-sd-islam-01', 'child-17', 'dua', '2026-08-13', 'not_completed', 'user-parent-17', '2026-08-13T19:30:00.000Z', 'parent', 1, '2026-08-13T19:30:00.000Z', '2026-08-13T19:30:00.000Z'),
   ('chk-2026-08-13-kindness-child-18', 'sch-sd-islam-01', 'child-18', 'kindness', '2026-08-13', 'not_completed', 'user-parent-18', '2026-08-13T19:30:00.000Z', 'parent', 1, '2026-08-13T19:30:00.000Z', '2026-08-13T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -4586,7 +4743,7 @@ VALUES
   ('chk-2026-08-13-fajr-child-44', 'sch-sd-islam-01', 'child-44', 'fajr', '2026-08-13', 'completed', 'user-parent-44', '2026-08-13T19:30:00.000Z', 'parent', 1, '2026-08-13T19:30:00.000Z', '2026-08-13T19:30:00.000Z'),
   ('chk-2026-08-13-isha-child-26', 'sch-sd-islam-01', 'child-26', 'isha', '2026-08-13', 'completed', 'user-parent-26', '2026-08-13T19:30:00.000Z', 'parent', 1, '2026-08-13T19:30:00.000Z', '2026-08-13T19:30:00.000Z'),
   ('chk-2026-08-13-asr-child-44', 'sch-sd-islam-01', 'child-44', 'asr', '2026-08-13', 'completed', 'user-parent-44', '2026-08-13T19:30:00.000Z', 'parent', 1, '2026-08-13T19:30:00.000Z', '2026-08-13T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -4690,7 +4847,7 @@ VALUES
   ('chk-2026-08-13-dua-child-44', 'sch-sd-islam-01', 'child-44', 'dua', '2026-08-13', 'not_completed', 'user-parent-44', '2026-08-13T19:30:00.000Z', 'parent', 1, '2026-08-13T19:30:00.000Z', '2026-08-13T19:30:00.000Z'),
   ('chk-2026-08-13-dua-child-45', 'sch-sd-islam-01', 'child-45', 'dua', '2026-08-13', 'not_completed', 'user-parent-45', '2026-08-13T19:30:00.000Z', 'parent', 1, '2026-08-13T19:30:00.000Z', '2026-08-13T19:30:00.000Z'),
   ('chk-2026-08-13-dua-child-41', 'sch-sd-islam-01', 'child-41', 'dua', '2026-08-13', 'not_completed', 'user-parent-41', '2026-08-13T19:30:00.000Z', 'parent', 1, '2026-08-13T19:30:00.000Z', '2026-08-13T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -4794,7 +4951,7 @@ VALUES
   ('chk-2026-08-14-fajr-child-14', 'sch-sd-islam-01', 'child-14', 'fajr', '2026-08-14', 'completed', 'user-parent-14', '2026-08-14T19:30:00.000Z', 'parent', 1, '2026-08-14T19:30:00.000Z', '2026-08-14T19:30:00.000Z'),
   ('chk-2026-08-14-quran-child-06', 'sch-sd-islam-01', 'child-06', 'quran', '2026-08-14', 'completed', 'user-parent-06', '2026-08-14T19:30:00.000Z', 'parent', 1, '2026-08-14T19:30:00.000Z', '2026-08-14T19:30:00.000Z'),
   ('chk-2026-08-14-isha-child-10', 'sch-sd-islam-01', 'child-10', 'isha', '2026-08-14', 'completed', 'user-parent-10', '2026-08-14T19:30:00.000Z', 'parent', 1, '2026-08-14T19:30:00.000Z', '2026-08-14T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -4898,7 +5055,7 @@ VALUES
   ('chk-2026-08-14-kindness-child-05', 'sch-sd-islam-01', 'child-05', 'kindness', '2026-08-14', 'not_completed', 'user-parent-05', '2026-08-14T19:30:00.000Z', 'parent', 1, '2026-08-14T19:30:00.000Z', '2026-08-14T19:30:00.000Z'),
   ('chk-2026-08-14-dua-child-24', 'sch-sd-islam-01', 'child-24', 'dua', '2026-08-14', 'not_completed', 'user-parent-24', '2026-08-14T19:30:00.000Z', 'parent', 1, '2026-08-14T19:30:00.000Z', '2026-08-14T19:30:00.000Z'),
   ('chk-2026-08-14-dua-child-25', 'sch-sd-islam-01', 'child-25', 'dua', '2026-08-14', 'not_reported', 'user-parent-25', '2026-08-14T19:30:00.000Z', 'parent', 1, '2026-08-14T19:30:00.000Z', '2026-08-14T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -5002,7 +5159,7 @@ VALUES
   ('chk-2026-08-14-isha-child-32', 'sch-sd-islam-01', 'child-32', 'isha', '2026-08-14', 'completed', 'user-parent-32', '2026-08-14T19:30:00.000Z', 'parent', 1, '2026-08-14T19:30:00.000Z', '2026-08-14T19:30:00.000Z'),
   ('chk-2026-08-14-maghrib-child-39', 'sch-sd-islam-01', 'child-39', 'maghrib', '2026-08-14', 'completed', 'user-parent-39', '2026-08-14T19:30:00.000Z', 'parent', 1, '2026-08-14T19:30:00.000Z', '2026-08-14T19:30:00.000Z'),
   ('chk-2026-08-14-quran-child-39', 'sch-sd-islam-01', 'child-39', 'quran', '2026-08-14', 'completed', 'user-parent-39', '2026-08-14T19:30:00.000Z', 'parent', 1, '2026-08-14T19:30:00.000Z', '2026-08-14T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -5106,7 +5263,7 @@ VALUES
   ('chk-2026-08-14-dua-child-26', 'sch-sd-islam-01', 'child-26', 'dua', '2026-08-14', 'not_completed', 'user-parent-26', '2026-08-14T19:30:00.000Z', 'parent', 1, '2026-08-14T19:30:00.000Z', '2026-08-14T19:30:00.000Z'),
   ('chk-2026-08-14-kindness-child-27', 'sch-sd-islam-01', 'child-27', 'kindness', '2026-08-14', 'not_completed', 'user-parent-27', '2026-08-14T19:30:00.000Z', 'parent', 1, '2026-08-14T19:30:00.000Z', '2026-08-14T19:30:00.000Z'),
   ('chk-2026-08-14-dua-child-50', 'sch-sd-islam-01', 'child-50', 'dua', '2026-08-14', 'not_completed', 'user-parent-50', '2026-08-14T19:30:00.000Z', 'parent', 1, '2026-08-14T19:30:00.000Z', '2026-08-14T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -5210,7 +5367,7 @@ VALUES
   ('chk-2026-08-15-asr-child-10', 'sch-sd-islam-01', 'child-10', 'asr', '2026-08-15', 'completed', 'user-parent-10', '2026-08-15T19:30:00.000Z', 'parent', 1, '2026-08-15T19:30:00.000Z', '2026-08-15T19:30:00.000Z'),
   ('chk-2026-08-15-fajr-child-01', 'sch-sd-islam-01', 'child-01', 'fajr', '2026-08-15', 'completed', 'user-parent-01', '2026-08-15T19:30:00.000Z', 'parent', 1, '2026-08-15T19:30:00.000Z', '2026-08-15T19:30:00.000Z'),
   ('chk-2026-08-15-fajr-child-02', 'sch-sd-islam-01', 'child-02', 'fajr', '2026-08-15', 'completed', 'user-parent-02', '2026-08-15T19:30:00.000Z', 'parent', 1, '2026-08-15T19:30:00.000Z', '2026-08-15T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -5314,7 +5471,7 @@ VALUES
   ('chk-2026-08-15-dua-child-05', 'sch-sd-islam-01', 'child-05', 'dua', '2026-08-15', 'not_completed', 'user-parent-05', '2026-08-15T19:30:00.000Z', 'parent', 1, '2026-08-15T19:30:00.000Z', '2026-08-15T19:30:00.000Z'),
   ('chk-2026-08-15-isha-child-05', 'sch-sd-islam-01', 'child-05', 'isha', '2026-08-15', 'not_completed', 'user-parent-05', '2026-08-15T19:30:00.000Z', 'parent', 1, '2026-08-15T19:30:00.000Z', '2026-08-15T19:30:00.000Z'),
   ('chk-2026-08-15-kindness-child-25', 'sch-sd-islam-01', 'child-25', 'kindness', '2026-08-15', 'not_completed', 'user-parent-25', '2026-08-15T19:30:00.000Z', 'parent', 1, '2026-08-15T19:30:00.000Z', '2026-08-15T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -5418,7 +5575,7 @@ VALUES
   ('chk-2026-08-15-quran-child-29', 'sch-sd-islam-01', 'child-29', 'quran', '2026-08-15', 'completed', 'user-parent-29', '2026-08-15T19:30:00.000Z', 'parent', 1, '2026-08-15T19:30:00.000Z', '2026-08-15T19:30:00.000Z'),
   ('chk-2026-08-15-fajr-child-30', 'sch-sd-islam-01', 'child-30', 'fajr', '2026-08-15', 'completed', 'user-parent-30', '2026-08-15T19:30:00.000Z', 'parent', 1, '2026-08-15T19:30:00.000Z', '2026-08-15T19:30:00.000Z'),
   ('chk-2026-08-15-maghrib-child-32', 'sch-sd-islam-01', 'child-32', 'maghrib', '2026-08-15', 'completed', 'user-parent-32', '2026-08-15T19:30:00.000Z', 'parent', 1, '2026-08-15T19:30:00.000Z', '2026-08-15T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -5522,7 +5679,7 @@ VALUES
   ('chk-2026-08-15-dua-child-27', 'sch-sd-islam-01', 'child-27', 'dua', '2026-08-15', 'not_reported', 'user-parent-27', '2026-08-15T19:30:00.000Z', 'parent', 1, '2026-08-15T19:30:00.000Z', '2026-08-15T19:30:00.000Z'),
   ('chk-2026-08-15-dua-child-50', 'sch-sd-islam-01', 'child-50', 'dua', '2026-08-15', 'not_reported', 'user-parent-50', '2026-08-15T19:30:00.000Z', 'parent', 1, '2026-08-15T19:30:00.000Z', '2026-08-15T19:30:00.000Z'),
   ('chk-2026-08-15-dua-child-49', 'sch-sd-islam-01', 'child-49', 'dua', '2026-08-15', 'not_completed', 'user-parent-49', '2026-08-15T19:30:00.000Z', 'parent', 1, '2026-08-15T19:30:00.000Z', '2026-08-15T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -5626,7 +5783,7 @@ VALUES
   ('chk-2026-08-16-asr-child-09', 'sch-sd-islam-01', 'child-09', 'asr', '2026-08-16', 'completed', 'user-parent-09', '2026-08-16T19:30:00.000Z', 'parent', 1, '2026-08-16T19:30:00.000Z', '2026-08-16T19:30:00.000Z'),
   ('chk-2026-08-16-fajr-child-21', 'sch-sd-islam-01', 'child-21', 'fajr', '2026-08-16', 'completed', 'user-parent-21', '2026-08-16T19:30:00.000Z', 'parent', 1, '2026-08-16T19:30:00.000Z', '2026-08-16T19:30:00.000Z'),
   ('chk-2026-08-16-kindness-child-16', 'sch-sd-islam-01', 'child-16', 'kindness', '2026-08-16', 'completed', 'user-parent-16', '2026-08-16T19:30:00.000Z', 'parent', 1, '2026-08-16T19:30:00.000Z', '2026-08-16T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -5730,7 +5887,7 @@ VALUES
   ('chk-2026-08-16-dua-child-22', 'sch-sd-islam-01', 'child-22', 'dua', '2026-08-16', 'not_completed', 'user-parent-22', '2026-08-16T19:30:00.000Z', 'parent', 1, '2026-08-16T19:30:00.000Z', '2026-08-16T19:30:00.000Z'),
   ('chk-2026-08-16-kindness-child-17', 'sch-sd-islam-01', 'child-17', 'kindness', '2026-08-16', 'not_completed', 'user-parent-17', '2026-08-16T19:30:00.000Z', 'parent', 1, '2026-08-16T19:30:00.000Z', '2026-08-16T19:30:00.000Z'),
   ('chk-2026-08-16-dua-child-05', 'sch-sd-islam-01', 'child-05', 'dua', '2026-08-16', 'not_reported', 'user-parent-05', '2026-08-16T19:30:00.000Z', 'parent', 1, '2026-08-16T19:30:00.000Z', '2026-08-16T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -5834,7 +5991,7 @@ VALUES
   ('chk-2026-08-16-isha-child-31', 'sch-sd-islam-01', 'child-31', 'isha', '2026-08-16', 'completed', 'user-parent-31', '2026-08-16T19:30:00.000Z', 'parent', 1, '2026-08-16T19:30:00.000Z', '2026-08-16T19:30:00.000Z'),
   ('chk-2026-08-16-dua-child-29', 'sch-sd-islam-01', 'child-29', 'dua', '2026-08-16', 'completed', 'user-parent-29', '2026-08-16T19:30:00.000Z', 'parent', 1, '2026-08-16T19:30:00.000Z', '2026-08-16T19:30:00.000Z'),
   ('chk-2026-08-16-dua-child-37', 'sch-sd-islam-01', 'child-37', 'dua', '2026-08-16', 'completed', 'user-parent-37', '2026-08-16T19:30:00.000Z', 'parent', 1, '2026-08-16T19:30:00.000Z', '2026-08-16T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -5938,7 +6095,7 @@ VALUES
   ('chk-2026-08-16-dua-child-33', 'sch-sd-islam-01', 'child-33', 'dua', '2026-08-16', 'not_completed', 'user-parent-33', '2026-08-16T19:30:00.000Z', 'parent', 1, '2026-08-16T19:30:00.000Z', '2026-08-16T19:30:00.000Z'),
   ('chk-2026-08-16-kindness-child-28', 'sch-sd-islam-01', 'child-28', 'kindness', '2026-08-16', 'not_reported', 'user-parent-28', '2026-08-16T19:30:00.000Z', 'parent', 1, '2026-08-16T19:30:00.000Z', '2026-08-16T19:30:00.000Z'),
   ('chk-2026-08-16-dua-child-41', 'sch-sd-islam-01', 'child-41', 'dua', '2026-08-16', 'not_completed', 'user-parent-41', '2026-08-16T19:30:00.000Z', 'parent', 1, '2026-08-16T19:30:00.000Z', '2026-08-16T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -6042,7 +6199,7 @@ VALUES
   ('chk-2026-08-17-kindness-child-08', 'sch-sd-islam-01', 'child-08', 'kindness', '2026-08-17', 'completed', 'user-parent-08', '2026-08-17T19:30:00.000Z', 'parent', 1, '2026-08-17T19:30:00.000Z', '2026-08-17T19:30:00.000Z'),
   ('chk-2026-08-17-dhuhr-child-14', 'sch-sd-islam-01', 'child-14', 'dhuhr', '2026-08-17', 'completed', 'user-parent-14', '2026-08-17T19:30:00.000Z', 'parent', 1, '2026-08-17T19:30:00.000Z', '2026-08-17T19:30:00.000Z'),
   ('chk-2026-08-17-fajr-child-22', 'sch-sd-islam-01', 'child-22', 'fajr', '2026-08-17', 'completed', 'user-parent-22', '2026-08-17T19:30:00.000Z', 'parent', 1, '2026-08-17T19:30:00.000Z', '2026-08-17T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -6146,7 +6303,7 @@ VALUES
   ('chk-2026-08-17-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-08-17', 'not_completed', 'user-parent-13', '2026-08-17T19:30:00.000Z', 'parent', 1, '2026-08-17T19:30:00.000Z', '2026-08-17T19:30:00.000Z'),
   ('chk-2026-08-17-dua-child-16', 'sch-sd-islam-01', 'child-16', 'dua', '2026-08-17', 'not_reported', 'user-parent-16', '2026-08-17T19:30:00.000Z', 'parent', 1, '2026-08-17T19:30:00.000Z', '2026-08-17T19:30:00.000Z'),
   ('chk-2026-08-17-dua-child-24', 'sch-sd-islam-01', 'child-24', 'dua', '2026-08-17', 'not_reported', 'user-parent-24', '2026-08-17T19:30:00.000Z', 'parent', 1, '2026-08-17T19:30:00.000Z', '2026-08-17T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -6250,7 +6407,7 @@ VALUES
   ('chk-2026-08-17-maghrib-child-34', 'sch-sd-islam-01', 'child-34', 'maghrib', '2026-08-17', 'completed', 'user-parent-34', '2026-08-17T19:30:00.000Z', 'parent', 1, '2026-08-17T19:30:00.000Z', '2026-08-17T19:30:00.000Z'),
   ('chk-2026-08-17-asr-child-42', 'sch-sd-islam-01', 'child-42', 'asr', '2026-08-17', 'completed', 'user-parent-42', '2026-08-17T19:30:00.000Z', 'parent', 1, '2026-08-17T19:30:00.000Z', '2026-08-17T19:30:00.000Z'),
   ('chk-2026-08-17-dhuhr-child-31', 'sch-sd-islam-01', 'child-31', 'dhuhr', '2026-08-17', 'completed', 'user-parent-31', '2026-08-17T19:30:00.000Z', 'parent', 1, '2026-08-17T19:30:00.000Z', '2026-08-17T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -6354,8 +6511,14 @@ VALUES
   ('chk-2026-08-17-dua-child-27', 'sch-sd-islam-01', 'child-27', 'dua', '2026-08-17', 'not_completed', 'user-parent-27', '2026-08-17T19:30:00.000Z', 'parent', 1, '2026-08-17T19:30:00.000Z', '2026-08-17T19:30:00.000Z'),
   ('chk-2026-08-17-kindness-child-50', 'sch-sd-islam-01', 'child-50', 'kindness', '2026-08-17', 'not_completed', 'user-parent-50', '2026-08-17T19:30:00.000Z', 'parent', 1, '2026-08-17T19:30:00.000Z', '2026-08-17T19:30:00.000Z'),
   ('chk-2026-08-17-dua-child-49', 'sch-sd-islam-01', 'child-49', 'dua', '2026-08-17', 'not_completed', 'user-parent-49', '2026-08-17T19:30:00.000Z', 'parent', 1, '2026-08-17T19:30:00.000Z', '2026-08-17T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
+
+-- =============================================================================
+-- BAGIAN 3 DARI 4: RIWAYAT CEKLIS PEKAN 3 & 4 (18 AGUSTUS - 31 AGUSTUS 2026)
+-- =============================================================================
+
+-- DATA: checklist_entries (5600 rows)
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
   ('chk-2026-08-18-dhuhr-child-01', 'sch-sd-islam-01', 'child-01', 'dhuhr', '2026-08-18', 'completed', 'user-parent-01', '2026-08-18T19:30:00.000Z', 'parent', 1, '2026-08-18T19:30:00.000Z', '2026-08-18T19:30:00.000Z'),
@@ -6458,7 +6621,7 @@ VALUES
   ('chk-2026-08-18-asr-child-06', 'sch-sd-islam-01', 'child-06', 'asr', '2026-08-18', 'completed', 'user-parent-06', '2026-08-18T19:30:00.000Z', 'parent', 1, '2026-08-18T19:30:00.000Z', '2026-08-18T19:30:00.000Z'),
   ('chk-2026-08-18-dhuhr-child-12', 'sch-sd-islam-01', 'child-12', 'dhuhr', '2026-08-18', 'completed', 'user-parent-12', '2026-08-18T19:30:00.000Z', 'parent', 1, '2026-08-18T19:30:00.000Z', '2026-08-18T19:30:00.000Z'),
   ('chk-2026-08-18-kindness-child-05', 'sch-sd-islam-01', 'child-05', 'kindness', '2026-08-18', 'completed', 'user-parent-05', '2026-08-18T19:30:00.000Z', 'parent', 1, '2026-08-18T19:30:00.000Z', '2026-08-18T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -6562,7 +6725,7 @@ VALUES
   ('chk-2026-08-18-kindness-child-17', 'sch-sd-islam-01', 'child-17', 'kindness', '2026-08-18', 'not_completed', 'user-parent-17', '2026-08-18T19:30:00.000Z', 'parent', 1, '2026-08-18T19:30:00.000Z', '2026-08-18T19:30:00.000Z'),
   ('chk-2026-08-18-dua-child-24', 'sch-sd-islam-01', 'child-24', 'dua', '2026-08-18', 'not_completed', 'user-parent-24', '2026-08-18T19:30:00.000Z', 'parent', 1, '2026-08-18T19:30:00.000Z', '2026-08-18T19:30:00.000Z'),
   ('chk-2026-08-18-dua-child-05', 'sch-sd-islam-01', 'child-05', 'dua', '2026-08-18', 'not_completed', 'user-parent-05', '2026-08-18T19:30:00.000Z', 'parent', 1, '2026-08-18T19:30:00.000Z', '2026-08-18T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -6666,7 +6829,7 @@ VALUES
   ('chk-2026-08-18-dhuhr-child-28', 'sch-sd-islam-01', 'child-28', 'dhuhr', '2026-08-18', 'completed', 'user-parent-28', '2026-08-18T19:30:00.000Z', 'parent', 1, '2026-08-18T19:30:00.000Z', '2026-08-18T19:30:00.000Z'),
   ('chk-2026-08-18-kindness-child-44', 'sch-sd-islam-01', 'child-44', 'kindness', '2026-08-18', 'completed', 'user-parent-44', '2026-08-18T19:30:00.000Z', 'parent', 1, '2026-08-18T19:30:00.000Z', '2026-08-18T19:30:00.000Z'),
   ('chk-2026-08-18-asr-child-27', 'sch-sd-islam-01', 'child-27', 'asr', '2026-08-18', 'completed', 'user-parent-27', '2026-08-18T19:30:00.000Z', 'parent', 1, '2026-08-18T19:30:00.000Z', '2026-08-18T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -6770,7 +6933,7 @@ VALUES
   ('chk-2026-08-18-dua-child-29', 'sch-sd-islam-01', 'child-29', 'dua', '2026-08-18', 'not_completed', 'user-parent-29', '2026-08-18T19:30:00.000Z', 'parent', 1, '2026-08-18T19:30:00.000Z', '2026-08-18T19:30:00.000Z'),
   ('chk-2026-08-18-kindness-child-28', 'sch-sd-islam-01', 'child-28', 'kindness', '2026-08-18', 'not_reported', 'user-parent-28', '2026-08-18T19:30:00.000Z', 'parent', 1, '2026-08-18T19:30:00.000Z', '2026-08-18T19:30:00.000Z'),
   ('chk-2026-08-18-dua-child-44', 'sch-sd-islam-01', 'child-44', 'dua', '2026-08-18', 'not_completed', 'user-parent-44', '2026-08-18T19:30:00.000Z', 'parent', 1, '2026-08-18T19:30:00.000Z', '2026-08-18T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -6874,7 +7037,7 @@ VALUES
   ('chk-2026-08-19-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-08-19', 'completed', 'user-parent-13', '2026-08-19T19:30:00.000Z', 'parent', 1, '2026-08-19T19:30:00.000Z', '2026-08-19T19:30:00.000Z'),
   ('chk-2026-08-19-kindness-child-08', 'sch-sd-islam-01', 'child-08', 'kindness', '2026-08-19', 'completed', 'user-parent-08', '2026-08-19T19:30:00.000Z', 'parent', 1, '2026-08-19T19:30:00.000Z', '2026-08-19T19:30:00.000Z'),
   ('chk-2026-08-19-isha-child-11', 'sch-sd-islam-01', 'child-11', 'isha', '2026-08-19', 'completed', 'user-parent-11', '2026-08-19T19:30:00.000Z', 'parent', 1, '2026-08-19T19:30:00.000Z', '2026-08-19T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -6978,7 +7141,7 @@ VALUES
   ('chk-2026-08-19-kindness-child-04', 'sch-sd-islam-01', 'child-04', 'kindness', '2026-08-19', 'not_completed', 'user-parent-04', '2026-08-19T19:30:00.000Z', 'parent', 1, '2026-08-19T19:30:00.000Z', '2026-08-19T19:30:00.000Z'),
   ('chk-2026-08-19-quran-child-05', 'sch-sd-islam-01', 'child-05', 'quran', '2026-08-19', 'not_completed', 'user-parent-05', '2026-08-19T19:30:00.000Z', 'parent', 1, '2026-08-19T19:30:00.000Z', '2026-08-19T19:30:00.000Z'),
   ('chk-2026-08-19-dua-child-04', 'sch-sd-islam-01', 'child-04', 'dua', '2026-08-19', 'not_completed', 'user-parent-04', '2026-08-19T19:30:00.000Z', 'parent', 1, '2026-08-19T19:30:00.000Z', '2026-08-19T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -7082,7 +7245,7 @@ VALUES
   ('chk-2026-08-19-asr-child-33', 'sch-sd-islam-01', 'child-33', 'asr', '2026-08-19', 'completed', 'user-parent-33', '2026-08-19T19:30:00.000Z', 'parent', 1, '2026-08-19T19:30:00.000Z', '2026-08-19T19:30:00.000Z'),
   ('chk-2026-08-19-maghrib-child-40', 'sch-sd-islam-01', 'child-40', 'maghrib', '2026-08-19', 'completed', 'user-parent-40', '2026-08-19T19:30:00.000Z', 'parent', 1, '2026-08-19T19:30:00.000Z', '2026-08-19T19:30:00.000Z'),
   ('chk-2026-08-19-quran-child-42', 'sch-sd-islam-01', 'child-42', 'quran', '2026-08-19', 'completed', 'user-parent-42', '2026-08-19T19:30:00.000Z', 'parent', 1, '2026-08-19T19:30:00.000Z', '2026-08-19T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -7186,7 +7349,7 @@ VALUES
   ('chk-2026-08-19-dua-child-30', 'sch-sd-islam-01', 'child-30', 'dua', '2026-08-19', 'not_reported', 'user-parent-30', '2026-08-19T19:30:00.000Z', 'parent', 1, '2026-08-19T19:30:00.000Z', '2026-08-19T19:30:00.000Z'),
   ('chk-2026-08-19-kindness-child-50', 'sch-sd-islam-01', 'child-50', 'kindness', '2026-08-19', 'not_completed', 'user-parent-50', '2026-08-19T19:30:00.000Z', 'parent', 1, '2026-08-19T19:30:00.000Z', '2026-08-19T19:30:00.000Z'),
   ('chk-2026-08-19-dua-child-44', 'sch-sd-islam-01', 'child-44', 'dua', '2026-08-19', 'not_completed', 'user-parent-44', '2026-08-19T19:30:00.000Z', 'parent', 1, '2026-08-19T19:30:00.000Z', '2026-08-19T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -7290,7 +7453,7 @@ VALUES
   ('chk-2026-08-20-maghrib-child-02', 'sch-sd-islam-01', 'child-02', 'maghrib', '2026-08-20', 'completed', 'user-parent-02', '2026-08-20T19:30:00.000Z', 'parent', 1, '2026-08-20T19:30:00.000Z', '2026-08-20T19:30:00.000Z'),
   ('chk-2026-08-20-isha-child-10', 'sch-sd-islam-01', 'child-10', 'isha', '2026-08-20', 'completed', 'user-parent-10', '2026-08-20T19:30:00.000Z', 'parent', 1, '2026-08-20T19:30:00.000Z', '2026-08-20T19:30:00.000Z'),
   ('chk-2026-08-20-quran-child-14', 'sch-sd-islam-01', 'child-14', 'quran', '2026-08-20', 'completed', 'user-parent-14', '2026-08-20T19:30:00.000Z', 'parent', 1, '2026-08-20T19:30:00.000Z', '2026-08-20T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -7394,7 +7557,7 @@ VALUES
   ('chk-2026-08-20-dua-child-19', 'sch-sd-islam-01', 'child-19', 'dua', '2026-08-20', 'not_completed', 'user-parent-19', '2026-08-20T19:30:00.000Z', 'parent', 1, '2026-08-20T19:30:00.000Z', '2026-08-20T19:30:00.000Z'),
   ('chk-2026-08-20-dua-child-16', 'sch-sd-islam-01', 'child-16', 'dua', '2026-08-20', 'not_completed', 'user-parent-16', '2026-08-20T19:30:00.000Z', 'parent', 1, '2026-08-20T19:30:00.000Z', '2026-08-20T19:30:00.000Z'),
   ('chk-2026-08-20-kindness-child-04', 'sch-sd-islam-01', 'child-04', 'kindness', '2026-08-20', 'not_completed', 'user-parent-04', '2026-08-20T19:30:00.000Z', 'parent', 1, '2026-08-20T19:30:00.000Z', '2026-08-20T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -7498,7 +7661,7 @@ VALUES
   ('chk-2026-08-20-maghrib-child-38', 'sch-sd-islam-01', 'child-38', 'maghrib', '2026-08-20', 'completed', 'user-parent-38', '2026-08-20T19:30:00.000Z', 'parent', 1, '2026-08-20T19:30:00.000Z', '2026-08-20T19:30:00.000Z'),
   ('chk-2026-08-20-maghrib-child-36', 'sch-sd-islam-01', 'child-36', 'maghrib', '2026-08-20', 'completed', 'user-parent-36', '2026-08-20T19:30:00.000Z', 'parent', 1, '2026-08-20T19:30:00.000Z', '2026-08-20T19:30:00.000Z'),
   ('chk-2026-08-20-quran-child-38', 'sch-sd-islam-01', 'child-38', 'quran', '2026-08-20', 'completed', 'user-parent-38', '2026-08-20T19:30:00.000Z', 'parent', 1, '2026-08-20T19:30:00.000Z', '2026-08-20T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -7602,7 +7765,7 @@ VALUES
   ('chk-2026-08-20-dua-child-27', 'sch-sd-islam-01', 'child-27', 'dua', '2026-08-20', 'not_completed', 'user-parent-27', '2026-08-20T19:30:00.000Z', 'parent', 1, '2026-08-20T19:30:00.000Z', '2026-08-20T19:30:00.000Z'),
   ('chk-2026-08-20-kindness-child-50', 'sch-sd-islam-01', 'child-50', 'kindness', '2026-08-20', 'not_completed', 'user-parent-50', '2026-08-20T19:30:00.000Z', 'parent', 1, '2026-08-20T19:30:00.000Z', '2026-08-20T19:30:00.000Z'),
   ('chk-2026-08-20-kindness-child-27', 'sch-sd-islam-01', 'child-27', 'kindness', '2026-08-20', 'not_completed', 'user-parent-27', '2026-08-20T19:30:00.000Z', 'parent', 1, '2026-08-20T19:30:00.000Z', '2026-08-20T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -7706,7 +7869,7 @@ VALUES
   ('chk-2026-08-21-fajr-child-09', 'sch-sd-islam-01', 'child-09', 'fajr', '2026-08-21', 'completed', 'user-parent-09', '2026-08-21T19:30:00.000Z', 'parent', 1, '2026-08-21T19:30:00.000Z', '2026-08-21T19:30:00.000Z'),
   ('chk-2026-08-21-fajr-child-23', 'sch-sd-islam-01', 'child-23', 'fajr', '2026-08-21', 'completed', 'user-parent-23', '2026-08-21T19:30:00.000Z', 'parent', 1, '2026-08-21T19:30:00.000Z', '2026-08-21T19:30:00.000Z'),
   ('chk-2026-08-21-dhuhr-child-01', 'sch-sd-islam-01', 'child-01', 'dhuhr', '2026-08-21', 'completed', 'user-parent-01', '2026-08-21T19:30:00.000Z', 'parent', 1, '2026-08-21T19:30:00.000Z', '2026-08-21T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -7810,7 +7973,7 @@ VALUES
   ('chk-2026-08-21-dua-child-04', 'sch-sd-islam-01', 'child-04', 'dua', '2026-08-21', 'not_completed', 'user-parent-04', '2026-08-21T19:30:00.000Z', 'parent', 1, '2026-08-21T19:30:00.000Z', '2026-08-21T19:30:00.000Z'),
   ('chk-2026-08-21-dua-child-03', 'sch-sd-islam-01', 'child-03', 'dua', '2026-08-21', 'not_completed', 'user-parent-03', '2026-08-21T19:30:00.000Z', 'parent', 1, '2026-08-21T19:30:00.000Z', '2026-08-21T19:30:00.000Z'),
   ('chk-2026-08-21-kindness-child-25', 'sch-sd-islam-01', 'child-25', 'kindness', '2026-08-21', 'not_completed', 'user-parent-25', '2026-08-21T19:30:00.000Z', 'parent', 1, '2026-08-21T19:30:00.000Z', '2026-08-21T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -7914,7 +8077,7 @@ VALUES
   ('chk-2026-08-21-kindness-child-42', 'sch-sd-islam-01', 'child-42', 'kindness', '2026-08-21', 'completed', 'user-parent-42', '2026-08-21T19:30:00.000Z', 'parent', 1, '2026-08-21T19:30:00.000Z', '2026-08-21T19:30:00.000Z'),
   ('chk-2026-08-21-kindness-child-40', 'sch-sd-islam-01', 'child-40', 'kindness', '2026-08-21', 'completed', 'user-parent-40', '2026-08-21T19:30:00.000Z', 'parent', 1, '2026-08-21T19:30:00.000Z', '2026-08-21T19:30:00.000Z'),
   ('chk-2026-08-21-quran-child-47', 'sch-sd-islam-01', 'child-47', 'quran', '2026-08-21', 'completed', 'user-parent-47', '2026-08-21T19:30:00.000Z', 'parent', 1, '2026-08-21T19:30:00.000Z', '2026-08-21T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -8018,7 +8181,7 @@ VALUES
   ('chk-2026-08-21-dua-child-50', 'sch-sd-islam-01', 'child-50', 'dua', '2026-08-21', 'not_completed', 'user-parent-50', '2026-08-21T19:30:00.000Z', 'parent', 1, '2026-08-21T19:30:00.000Z', '2026-08-21T19:30:00.000Z'),
   ('chk-2026-08-21-dua-child-46', 'sch-sd-islam-01', 'child-46', 'dua', '2026-08-21', 'not_completed', 'user-parent-46', '2026-08-21T19:30:00.000Z', 'parent', 1, '2026-08-21T19:30:00.000Z', '2026-08-21T19:30:00.000Z'),
   ('chk-2026-08-21-kindness-child-50', 'sch-sd-islam-01', 'child-50', 'kindness', '2026-08-21', 'not_completed', 'user-parent-50', '2026-08-21T19:30:00.000Z', 'parent', 1, '2026-08-21T19:30:00.000Z', '2026-08-21T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -8122,7 +8285,7 @@ VALUES
   ('chk-2026-08-22-kindness-child-08', 'sch-sd-islam-01', 'child-08', 'kindness', '2026-08-22', 'completed', 'user-parent-08', '2026-08-22T19:30:00.000Z', 'parent', 1, '2026-08-22T19:30:00.000Z', '2026-08-22T19:30:00.000Z'),
   ('chk-2026-08-22-dua-child-08', 'sch-sd-islam-01', 'child-08', 'dua', '2026-08-22', 'completed', 'user-parent-08', '2026-08-22T19:30:00.000Z', 'parent', 1, '2026-08-22T19:30:00.000Z', '2026-08-22T19:30:00.000Z'),
   ('chk-2026-08-22-maghrib-child-07', 'sch-sd-islam-01', 'child-07', 'maghrib', '2026-08-22', 'completed', 'user-parent-07', '2026-08-22T19:30:00.000Z', 'parent', 1, '2026-08-22T19:30:00.000Z', '2026-08-22T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -8226,7 +8389,7 @@ VALUES
   ('chk-2026-08-22-dua-child-22', 'sch-sd-islam-01', 'child-22', 'dua', '2026-08-22', 'not_completed', 'user-parent-22', '2026-08-22T19:30:00.000Z', 'parent', 1, '2026-08-22T19:30:00.000Z', '2026-08-22T19:30:00.000Z'),
   ('chk-2026-08-22-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-08-22', 'not_reported', 'user-parent-13', '2026-08-22T19:30:00.000Z', 'parent', 1, '2026-08-22T19:30:00.000Z', '2026-08-22T19:30:00.000Z'),
   ('chk-2026-08-22-quran-child-05', 'sch-sd-islam-01', 'child-05', 'quran', '2026-08-22', 'not_completed', 'user-parent-05', '2026-08-22T19:30:00.000Z', 'parent', 1, '2026-08-22T19:30:00.000Z', '2026-08-22T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -8330,7 +8493,7 @@ VALUES
   ('chk-2026-08-22-dua-child-45', 'sch-sd-islam-01', 'child-45', 'dua', '2026-08-22', 'completed', 'user-parent-45', '2026-08-22T19:30:00.000Z', 'parent', 1, '2026-08-22T19:30:00.000Z', '2026-08-22T19:30:00.000Z'),
   ('chk-2026-08-22-isha-child-46', 'sch-sd-islam-01', 'child-46', 'isha', '2026-08-22', 'completed', 'user-parent-46', '2026-08-22T19:30:00.000Z', 'parent', 1, '2026-08-22T19:30:00.000Z', '2026-08-22T19:30:00.000Z'),
   ('chk-2026-08-22-kindness-child-41', 'sch-sd-islam-01', 'child-41', 'kindness', '2026-08-22', 'completed', 'user-parent-41', '2026-08-22T19:30:00.000Z', 'parent', 1, '2026-08-22T19:30:00.000Z', '2026-08-22T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -8434,7 +8597,7 @@ VALUES
   ('chk-2026-08-22-dua-child-36', 'sch-sd-islam-01', 'child-36', 'dua', '2026-08-22', 'not_completed', 'user-parent-36', '2026-08-22T19:30:00.000Z', 'parent', 1, '2026-08-22T19:30:00.000Z', '2026-08-22T19:30:00.000Z'),
   ('chk-2026-08-22-dua-child-27', 'sch-sd-islam-01', 'child-27', 'dua', '2026-08-22', 'not_completed', 'user-parent-27', '2026-08-22T19:30:00.000Z', 'parent', 1, '2026-08-22T19:30:00.000Z', '2026-08-22T19:30:00.000Z'),
   ('chk-2026-08-22-kindness-child-50', 'sch-sd-islam-01', 'child-50', 'kindness', '2026-08-22', 'not_completed', 'user-parent-50', '2026-08-22T19:30:00.000Z', 'parent', 1, '2026-08-22T19:30:00.000Z', '2026-08-22T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -8538,7 +8701,7 @@ VALUES
   ('chk-2026-08-23-fajr-child-06', 'sch-sd-islam-01', 'child-06', 'fajr', '2026-08-23', 'completed', 'user-parent-06', '2026-08-23T19:30:00.000Z', 'parent', 1, '2026-08-23T19:30:00.000Z', '2026-08-23T19:30:00.000Z'),
   ('chk-2026-08-23-kindness-child-24', 'sch-sd-islam-01', 'child-24', 'kindness', '2026-08-23', 'completed', 'user-parent-24', '2026-08-23T19:30:00.000Z', 'parent', 1, '2026-08-23T19:30:00.000Z', '2026-08-23T19:30:00.000Z'),
   ('chk-2026-08-23-quran-child-24', 'sch-sd-islam-01', 'child-24', 'quran', '2026-08-23', 'completed', 'user-parent-24', '2026-08-23T19:30:00.000Z', 'parent', 1, '2026-08-23T19:30:00.000Z', '2026-08-23T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -8642,7 +8805,7 @@ VALUES
   ('chk-2026-08-23-isha-child-05', 'sch-sd-islam-01', 'child-05', 'isha', '2026-08-23', 'not_completed', 'user-parent-05', '2026-08-23T19:30:00.000Z', 'parent', 1, '2026-08-23T19:30:00.000Z', '2026-08-23T19:30:00.000Z'),
   ('chk-2026-08-23-dua-child-18', 'sch-sd-islam-01', 'child-18', 'dua', '2026-08-23', 'not_completed', 'user-parent-18', '2026-08-23T19:30:00.000Z', 'parent', 1, '2026-08-23T19:30:00.000Z', '2026-08-23T19:30:00.000Z'),
   ('chk-2026-08-23-dua-child-05', 'sch-sd-islam-01', 'child-05', 'dua', '2026-08-23', 'not_completed', 'user-parent-05', '2026-08-23T19:30:00.000Z', 'parent', 1, '2026-08-23T19:30:00.000Z', '2026-08-23T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -8746,7 +8909,7 @@ VALUES
   ('chk-2026-08-23-maghrib-child-33', 'sch-sd-islam-01', 'child-33', 'maghrib', '2026-08-23', 'completed', 'user-parent-33', '2026-08-23T19:30:00.000Z', 'parent', 1, '2026-08-23T19:30:00.000Z', '2026-08-23T19:30:00.000Z'),
   ('chk-2026-08-23-maghrib-child-29', 'sch-sd-islam-01', 'child-29', 'maghrib', '2026-08-23', 'completed', 'user-parent-29', '2026-08-23T19:30:00.000Z', 'parent', 1, '2026-08-23T19:30:00.000Z', '2026-08-23T19:30:00.000Z'),
   ('chk-2026-08-23-dua-child-39', 'sch-sd-islam-01', 'child-39', 'dua', '2026-08-23', 'completed', 'user-parent-39', '2026-08-23T19:30:00.000Z', 'parent', 1, '2026-08-23T19:30:00.000Z', '2026-08-23T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -8850,7 +9013,7 @@ VALUES
   ('chk-2026-08-23-dua-child-48', 'sch-sd-islam-01', 'child-48', 'dua', '2026-08-23', 'not_completed', 'user-parent-48', '2026-08-23T19:30:00.000Z', 'parent', 1, '2026-08-23T19:30:00.000Z', '2026-08-23T19:30:00.000Z'),
   ('chk-2026-08-23-dua-child-30', 'sch-sd-islam-01', 'child-30', 'dua', '2026-08-23', 'not_completed', 'user-parent-30', '2026-08-23T19:30:00.000Z', 'parent', 1, '2026-08-23T19:30:00.000Z', '2026-08-23T19:30:00.000Z'),
   ('chk-2026-08-23-kindness-child-49', 'sch-sd-islam-01', 'child-49', 'kindness', '2026-08-23', 'not_reported', 'user-parent-49', '2026-08-23T19:30:00.000Z', 'parent', 1, '2026-08-23T19:30:00.000Z', '2026-08-23T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -8954,7 +9117,7 @@ VALUES
   ('chk-2026-08-24-fajr-child-21', 'sch-sd-islam-01', 'child-21', 'fajr', '2026-08-24', 'completed', 'user-parent-21', '2026-08-24T19:30:00.000Z', 'parent', 1, '2026-08-24T19:30:00.000Z', '2026-08-24T19:30:00.000Z'),
   ('chk-2026-08-24-maghrib-child-11', 'sch-sd-islam-01', 'child-11', 'maghrib', '2026-08-24', 'completed', 'user-parent-11', '2026-08-24T19:30:00.000Z', 'parent', 1, '2026-08-24T19:30:00.000Z', '2026-08-24T19:30:00.000Z'),
   ('chk-2026-08-24-kindness-child-10', 'sch-sd-islam-01', 'child-10', 'kindness', '2026-08-24', 'completed', 'user-parent-10', '2026-08-24T19:30:00.000Z', 'parent', 1, '2026-08-24T19:30:00.000Z', '2026-08-24T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -9058,7 +9221,7 @@ VALUES
   ('chk-2026-08-24-isha-child-13', 'sch-sd-islam-01', 'child-13', 'isha', '2026-08-24', 'not_completed', 'user-parent-13', '2026-08-24T19:30:00.000Z', 'parent', 1, '2026-08-24T19:30:00.000Z', '2026-08-24T19:30:00.000Z'),
   ('chk-2026-08-24-dua-child-03', 'sch-sd-islam-01', 'child-03', 'dua', '2026-08-24', 'not_completed', 'user-parent-03', '2026-08-24T19:30:00.000Z', 'parent', 1, '2026-08-24T19:30:00.000Z', '2026-08-24T19:30:00.000Z'),
   ('chk-2026-08-24-dua-child-05', 'sch-sd-islam-01', 'child-05', 'dua', '2026-08-24', 'not_completed', 'user-parent-05', '2026-08-24T19:30:00.000Z', 'parent', 1, '2026-08-24T19:30:00.000Z', '2026-08-24T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -9162,7 +9325,7 @@ VALUES
   ('chk-2026-08-24-quran-child-42', 'sch-sd-islam-01', 'child-42', 'quran', '2026-08-24', 'completed', 'user-parent-42', '2026-08-24T19:30:00.000Z', 'parent', 1, '2026-08-24T19:30:00.000Z', '2026-08-24T19:30:00.000Z'),
   ('chk-2026-08-24-kindness-child-38', 'sch-sd-islam-01', 'child-38', 'kindness', '2026-08-24', 'completed', 'user-parent-38', '2026-08-24T19:30:00.000Z', 'parent', 1, '2026-08-24T19:30:00.000Z', '2026-08-24T19:30:00.000Z'),
   ('chk-2026-08-24-quran-child-31', 'sch-sd-islam-01', 'child-31', 'quran', '2026-08-24', 'completed', 'user-parent-31', '2026-08-24T19:30:00.000Z', 'parent', 1, '2026-08-24T19:30:00.000Z', '2026-08-24T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -9266,7 +9429,7 @@ VALUES
   ('chk-2026-08-24-dua-child-42', 'sch-sd-islam-01', 'child-42', 'dua', '2026-08-24', 'not_completed', 'user-parent-42', '2026-08-24T19:30:00.000Z', 'parent', 1, '2026-08-24T19:30:00.000Z', '2026-08-24T19:30:00.000Z'),
   ('chk-2026-08-24-quran-child-27', 'sch-sd-islam-01', 'child-27', 'quran', '2026-08-24', 'not_completed', 'user-parent-27', '2026-08-24T19:30:00.000Z', 'parent', 1, '2026-08-24T19:30:00.000Z', '2026-08-24T19:30:00.000Z'),
   ('chk-2026-08-24-dua-child-46', 'sch-sd-islam-01', 'child-46', 'dua', '2026-08-24', 'not_reported', 'user-parent-46', '2026-08-24T19:30:00.000Z', 'parent', 1, '2026-08-24T19:30:00.000Z', '2026-08-24T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -9370,7 +9533,7 @@ VALUES
   ('chk-2026-08-25-dua-child-03', 'sch-sd-islam-01', 'child-03', 'dua', '2026-08-25', 'completed', 'user-parent-03', '2026-08-25T19:30:00.000Z', 'parent', 1, '2026-08-25T19:30:00.000Z', '2026-08-25T19:30:00.000Z'),
   ('chk-2026-08-25-dhuhr-child-21', 'sch-sd-islam-01', 'child-21', 'dhuhr', '2026-08-25', 'completed', 'user-parent-21', '2026-08-25T19:30:00.000Z', 'parent', 1, '2026-08-25T19:30:00.000Z', '2026-08-25T19:30:00.000Z'),
   ('chk-2026-08-25-fajr-child-07', 'sch-sd-islam-01', 'child-07', 'fajr', '2026-08-25', 'completed', 'user-parent-07', '2026-08-25T19:30:00.000Z', 'parent', 1, '2026-08-25T19:30:00.000Z', '2026-08-25T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -9474,7 +9637,7 @@ VALUES
   ('chk-2026-08-25-dua-child-07', 'sch-sd-islam-01', 'child-07', 'dua', '2026-08-25', 'not_completed', 'user-parent-07', '2026-08-25T19:30:00.000Z', 'parent', 1, '2026-08-25T19:30:00.000Z', '2026-08-25T19:30:00.000Z'),
   ('chk-2026-08-25-kindness-child-22', 'sch-sd-islam-01', 'child-22', 'kindness', '2026-08-25', 'not_completed', 'user-parent-22', '2026-08-25T19:30:00.000Z', 'parent', 1, '2026-08-25T19:30:00.000Z', '2026-08-25T19:30:00.000Z'),
   ('chk-2026-08-25-quran-child-13', 'sch-sd-islam-01', 'child-13', 'quran', '2026-08-25', 'not_completed', 'user-parent-13', '2026-08-25T19:30:00.000Z', 'parent', 1, '2026-08-25T19:30:00.000Z', '2026-08-25T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -9578,7 +9741,7 @@ VALUES
   ('chk-2026-08-25-dhuhr-child-35', 'sch-sd-islam-01', 'child-35', 'dhuhr', '2026-08-25', 'completed', 'user-parent-35', '2026-08-25T19:30:00.000Z', 'parent', 1, '2026-08-25T19:30:00.000Z', '2026-08-25T19:30:00.000Z'),
   ('chk-2026-08-25-maghrib-child-28', 'sch-sd-islam-01', 'child-28', 'maghrib', '2026-08-25', 'completed', 'user-parent-28', '2026-08-25T19:30:00.000Z', 'parent', 1, '2026-08-25T19:30:00.000Z', '2026-08-25T19:30:00.000Z'),
   ('chk-2026-08-25-maghrib-child-37', 'sch-sd-islam-01', 'child-37', 'maghrib', '2026-08-25', 'completed', 'user-parent-37', '2026-08-25T19:30:00.000Z', 'parent', 1, '2026-08-25T19:30:00.000Z', '2026-08-25T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -9682,7 +9845,7 @@ VALUES
   ('chk-2026-08-25-dua-child-48', 'sch-sd-islam-01', 'child-48', 'dua', '2026-08-25', 'not_completed', 'user-parent-48', '2026-08-25T19:30:00.000Z', 'parent', 1, '2026-08-25T19:30:00.000Z', '2026-08-25T19:30:00.000Z'),
   ('chk-2026-08-25-kindness-child-41', 'sch-sd-islam-01', 'child-41', 'kindness', '2026-08-25', 'not_completed', 'user-parent-41', '2026-08-25T19:30:00.000Z', 'parent', 1, '2026-08-25T19:30:00.000Z', '2026-08-25T19:30:00.000Z'),
   ('chk-2026-08-25-dua-child-46', 'sch-sd-islam-01', 'child-46', 'dua', '2026-08-25', 'not_reported', 'user-parent-46', '2026-08-25T19:30:00.000Z', 'parent', 1, '2026-08-25T19:30:00.000Z', '2026-08-25T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -9786,7 +9949,7 @@ VALUES
   ('chk-2026-08-26-kindness-child-16', 'sch-sd-islam-01', 'child-16', 'kindness', '2026-08-26', 'completed', 'user-parent-16', '2026-08-26T19:30:00.000Z', 'parent', 1, '2026-08-26T19:30:00.000Z', '2026-08-26T19:30:00.000Z'),
   ('chk-2026-08-26-maghrib-child-16', 'sch-sd-islam-01', 'child-16', 'maghrib', '2026-08-26', 'completed', 'user-parent-16', '2026-08-26T19:30:00.000Z', 'parent', 1, '2026-08-26T19:30:00.000Z', '2026-08-26T19:30:00.000Z'),
   ('chk-2026-08-26-dua-child-14', 'sch-sd-islam-01', 'child-14', 'dua', '2026-08-26', 'completed', 'user-parent-14', '2026-08-26T19:30:00.000Z', 'parent', 1, '2026-08-26T19:30:00.000Z', '2026-08-26T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -9890,7 +10053,7 @@ VALUES
   ('chk-2026-08-26-dua-child-18', 'sch-sd-islam-01', 'child-18', 'dua', '2026-08-26', 'not_completed', 'user-parent-18', '2026-08-26T19:30:00.000Z', 'parent', 1, '2026-08-26T19:30:00.000Z', '2026-08-26T19:30:00.000Z'),
   ('chk-2026-08-26-kindness-child-05', 'sch-sd-islam-01', 'child-05', 'kindness', '2026-08-26', 'not_reported', 'user-parent-05', '2026-08-26T19:30:00.000Z', 'parent', 1, '2026-08-26T19:30:00.000Z', '2026-08-26T19:30:00.000Z'),
   ('chk-2026-08-26-dua-child-05', 'sch-sd-islam-01', 'child-05', 'dua', '2026-08-26', 'not_reported', 'user-parent-05', '2026-08-26T19:30:00.000Z', 'parent', 1, '2026-08-26T19:30:00.000Z', '2026-08-26T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -9994,7 +10157,7 @@ VALUES
   ('chk-2026-08-26-isha-child-45', 'sch-sd-islam-01', 'child-45', 'isha', '2026-08-26', 'completed', 'user-parent-45', '2026-08-26T19:30:00.000Z', 'parent', 1, '2026-08-26T19:30:00.000Z', '2026-08-26T19:30:00.000Z'),
   ('chk-2026-08-26-fajr-child-28', 'sch-sd-islam-01', 'child-28', 'fajr', '2026-08-26', 'completed', 'user-parent-28', '2026-08-26T19:30:00.000Z', 'parent', 1, '2026-08-26T19:30:00.000Z', '2026-08-26T19:30:00.000Z'),
   ('chk-2026-08-26-maghrib-child-30', 'sch-sd-islam-01', 'child-30', 'maghrib', '2026-08-26', 'completed', 'user-parent-30', '2026-08-26T19:30:00.000Z', 'parent', 1, '2026-08-26T19:30:00.000Z', '2026-08-26T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -10098,7 +10261,7 @@ VALUES
   ('chk-2026-08-26-dua-child-27', 'sch-sd-islam-01', 'child-27', 'dua', '2026-08-26', 'not_reported', 'user-parent-27', '2026-08-26T19:30:00.000Z', 'parent', 1, '2026-08-26T19:30:00.000Z', '2026-08-26T19:30:00.000Z'),
   ('chk-2026-08-26-quran-child-49', 'sch-sd-islam-01', 'child-49', 'quran', '2026-08-26', 'not_completed', 'user-parent-49', '2026-08-26T19:30:00.000Z', 'parent', 1, '2026-08-26T19:30:00.000Z', '2026-08-26T19:30:00.000Z'),
   ('chk-2026-08-26-dua-child-50', 'sch-sd-islam-01', 'child-50', 'dua', '2026-08-26', 'not_completed', 'user-parent-50', '2026-08-26T19:30:00.000Z', 'parent', 1, '2026-08-26T19:30:00.000Z', '2026-08-26T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -10202,7 +10365,7 @@ VALUES
   ('chk-2026-08-27-dua-child-22', 'sch-sd-islam-01', 'child-22', 'dua', '2026-08-27', 'completed', 'user-parent-22', '2026-08-27T19:30:00.000Z', 'parent', 1, '2026-08-27T19:30:00.000Z', '2026-08-27T19:30:00.000Z'),
   ('chk-2026-08-27-isha-child-01', 'sch-sd-islam-01', 'child-01', 'isha', '2026-08-27', 'completed', 'user-parent-01', '2026-08-27T19:30:00.000Z', 'parent', 1, '2026-08-27T19:30:00.000Z', '2026-08-27T19:30:00.000Z'),
   ('chk-2026-08-27-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-08-27', 'completed', 'user-parent-13', '2026-08-27T19:30:00.000Z', 'parent', 1, '2026-08-27T19:30:00.000Z', '2026-08-27T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -10306,7 +10469,7 @@ VALUES
   ('chk-2026-08-27-dua-child-17', 'sch-sd-islam-01', 'child-17', 'dua', '2026-08-27', 'not_completed', 'user-parent-17', '2026-08-27T19:30:00.000Z', 'parent', 1, '2026-08-27T19:30:00.000Z', '2026-08-27T19:30:00.000Z'),
   ('chk-2026-08-27-dua-child-03', 'sch-sd-islam-01', 'child-03', 'dua', '2026-08-27', 'not_completed', 'user-parent-03', '2026-08-27T19:30:00.000Z', 'parent', 1, '2026-08-27T19:30:00.000Z', '2026-08-27T19:30:00.000Z'),
   ('chk-2026-08-27-dua-child-24', 'sch-sd-islam-01', 'child-24', 'dua', '2026-08-27', 'not_reported', 'user-parent-24', '2026-08-27T19:30:00.000Z', 'parent', 1, '2026-08-27T19:30:00.000Z', '2026-08-27T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -10410,7 +10573,7 @@ VALUES
   ('chk-2026-08-27-quran-child-38', 'sch-sd-islam-01', 'child-38', 'quran', '2026-08-27', 'completed', 'user-parent-38', '2026-08-27T19:30:00.000Z', 'parent', 1, '2026-08-27T19:30:00.000Z', '2026-08-27T19:30:00.000Z'),
   ('chk-2026-08-27-kindness-child-34', 'sch-sd-islam-01', 'child-34', 'kindness', '2026-08-27', 'completed', 'user-parent-34', '2026-08-27T19:30:00.000Z', 'parent', 1, '2026-08-27T19:30:00.000Z', '2026-08-27T19:30:00.000Z'),
   ('chk-2026-08-27-isha-child-27', 'sch-sd-islam-01', 'child-27', 'isha', '2026-08-27', 'completed', 'user-parent-27', '2026-08-27T19:30:00.000Z', 'parent', 1, '2026-08-27T19:30:00.000Z', '2026-08-27T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -10514,7 +10677,7 @@ VALUES
   ('chk-2026-08-27-dua-child-27', 'sch-sd-islam-01', 'child-27', 'dua', '2026-08-27', 'not_completed', 'user-parent-27', '2026-08-27T19:30:00.000Z', 'parent', 1, '2026-08-27T19:30:00.000Z', '2026-08-27T19:30:00.000Z'),
   ('chk-2026-08-27-kindness-child-45', 'sch-sd-islam-01', 'child-45', 'kindness', '2026-08-27', 'not_completed', 'user-parent-45', '2026-08-27T19:30:00.000Z', 'parent', 1, '2026-08-27T19:30:00.000Z', '2026-08-27T19:30:00.000Z'),
   ('chk-2026-08-27-dua-child-46', 'sch-sd-islam-01', 'child-46', 'dua', '2026-08-27', 'not_completed', 'user-parent-46', '2026-08-27T19:30:00.000Z', 'parent', 1, '2026-08-27T19:30:00.000Z', '2026-08-27T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -10618,7 +10781,7 @@ VALUES
   ('chk-2026-08-28-isha-child-12', 'sch-sd-islam-01', 'child-12', 'isha', '2026-08-28', 'completed', 'user-parent-12', '2026-08-28T19:30:00.000Z', 'parent', 1, '2026-08-28T19:30:00.000Z', '2026-08-28T19:30:00.000Z'),
   ('chk-2026-08-28-asr-child-15', 'sch-sd-islam-01', 'child-15', 'asr', '2026-08-28', 'completed', 'user-parent-15', '2026-08-28T19:30:00.000Z', 'parent', 1, '2026-08-28T19:30:00.000Z', '2026-08-28T19:30:00.000Z'),
   ('chk-2026-08-28-kindness-child-15', 'sch-sd-islam-01', 'child-15', 'kindness', '2026-08-28', 'completed', 'user-parent-15', '2026-08-28T19:30:00.000Z', 'parent', 1, '2026-08-28T19:30:00.000Z', '2026-08-28T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -10722,7 +10885,7 @@ VALUES
   ('chk-2026-08-28-asr-child-05', 'sch-sd-islam-01', 'child-05', 'asr', '2026-08-28', 'not_completed', 'user-parent-05', '2026-08-28T19:30:00.000Z', 'parent', 1, '2026-08-28T19:30:00.000Z', '2026-08-28T19:30:00.000Z'),
   ('chk-2026-08-28-quran-child-05', 'sch-sd-islam-01', 'child-05', 'quran', '2026-08-28', 'not_completed', 'user-parent-05', '2026-08-28T19:30:00.000Z', 'parent', 1, '2026-08-28T19:30:00.000Z', '2026-08-28T19:30:00.000Z'),
   ('chk-2026-08-28-kindness-child-13', 'sch-sd-islam-01', 'child-13', 'kindness', '2026-08-28', 'not_completed', 'user-parent-13', '2026-08-28T19:30:00.000Z', 'parent', 1, '2026-08-28T19:30:00.000Z', '2026-08-28T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -10826,7 +10989,7 @@ VALUES
   ('chk-2026-08-28-kindness-child-48', 'sch-sd-islam-01', 'child-48', 'kindness', '2026-08-28', 'completed', 'user-parent-48', '2026-08-28T19:30:00.000Z', 'parent', 1, '2026-08-28T19:30:00.000Z', '2026-08-28T19:30:00.000Z'),
   ('chk-2026-08-28-asr-child-41', 'sch-sd-islam-01', 'child-41', 'asr', '2026-08-28', 'completed', 'user-parent-41', '2026-08-28T19:30:00.000Z', 'parent', 1, '2026-08-28T19:30:00.000Z', '2026-08-28T19:30:00.000Z'),
   ('chk-2026-08-28-quran-child-30', 'sch-sd-islam-01', 'child-30', 'quran', '2026-08-28', 'completed', 'user-parent-30', '2026-08-28T19:30:00.000Z', 'parent', 1, '2026-08-28T19:30:00.000Z', '2026-08-28T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -10930,7 +11093,7 @@ VALUES
   ('chk-2026-08-28-quran-child-50', 'sch-sd-islam-01', 'child-50', 'quran', '2026-08-28', 'not_completed', 'user-parent-50', '2026-08-28T19:30:00.000Z', 'parent', 1, '2026-08-28T19:30:00.000Z', '2026-08-28T19:30:00.000Z'),
   ('chk-2026-08-28-dua-child-49', 'sch-sd-islam-01', 'child-49', 'dua', '2026-08-28', 'not_completed', 'user-parent-49', '2026-08-28T19:30:00.000Z', 'parent', 1, '2026-08-28T19:30:00.000Z', '2026-08-28T19:30:00.000Z'),
   ('chk-2026-08-28-dua-child-32', 'sch-sd-islam-01', 'child-32', 'dua', '2026-08-28', 'not_completed', 'user-parent-32', '2026-08-28T19:30:00.000Z', 'parent', 1, '2026-08-28T19:30:00.000Z', '2026-08-28T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -11034,7 +11197,7 @@ VALUES
   ('chk-2026-08-29-kindness-child-14', 'sch-sd-islam-01', 'child-14', 'kindness', '2026-08-29', 'completed', 'user-parent-14', '2026-08-29T19:30:00.000Z', 'parent', 1, '2026-08-29T19:30:00.000Z', '2026-08-29T19:30:00.000Z'),
   ('chk-2026-08-29-quran-child-13', 'sch-sd-islam-01', 'child-13', 'quran', '2026-08-29', 'completed', 'user-parent-13', '2026-08-29T19:30:00.000Z', 'parent', 1, '2026-08-29T19:30:00.000Z', '2026-08-29T19:30:00.000Z'),
   ('chk-2026-08-29-dhuhr-child-13', 'sch-sd-islam-01', 'child-13', 'dhuhr', '2026-08-29', 'completed', 'user-parent-13', '2026-08-29T19:30:00.000Z', 'parent', 1, '2026-08-29T19:30:00.000Z', '2026-08-29T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -11138,7 +11301,7 @@ VALUES
   ('chk-2026-08-29-dua-child-10', 'sch-sd-islam-01', 'child-10', 'dua', '2026-08-29', 'not_completed', 'user-parent-10', '2026-08-29T19:30:00.000Z', 'parent', 1, '2026-08-29T19:30:00.000Z', '2026-08-29T19:30:00.000Z'),
   ('chk-2026-08-29-isha-child-05', 'sch-sd-islam-01', 'child-05', 'isha', '2026-08-29', 'not_completed', 'user-parent-05', '2026-08-29T19:30:00.000Z', 'parent', 1, '2026-08-29T19:30:00.000Z', '2026-08-29T19:30:00.000Z'),
   ('chk-2026-08-29-kindness-child-05', 'sch-sd-islam-01', 'child-05', 'kindness', '2026-08-29', 'not_completed', 'user-parent-05', '2026-08-29T19:30:00.000Z', 'parent', 1, '2026-08-29T19:30:00.000Z', '2026-08-29T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -11242,7 +11405,7 @@ VALUES
   ('chk-2026-08-29-quran-child-39', 'sch-sd-islam-01', 'child-39', 'quran', '2026-08-29', 'completed', 'user-parent-39', '2026-08-29T19:30:00.000Z', 'parent', 1, '2026-08-29T19:30:00.000Z', '2026-08-29T19:30:00.000Z'),
   ('chk-2026-08-29-fajr-child-31', 'sch-sd-islam-01', 'child-31', 'fajr', '2026-08-29', 'completed', 'user-parent-31', '2026-08-29T19:30:00.000Z', 'parent', 1, '2026-08-29T19:30:00.000Z', '2026-08-29T19:30:00.000Z'),
   ('chk-2026-08-29-fajr-child-37', 'sch-sd-islam-01', 'child-37', 'fajr', '2026-08-29', 'completed', 'user-parent-37', '2026-08-29T19:30:00.000Z', 'parent', 1, '2026-08-29T19:30:00.000Z', '2026-08-29T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -11346,7 +11509,7 @@ VALUES
   ('chk-2026-08-29-dua-child-43', 'sch-sd-islam-01', 'child-43', 'dua', '2026-08-29', 'not_completed', 'user-parent-43', '2026-08-29T19:30:00.000Z', 'parent', 1, '2026-08-29T19:30:00.000Z', '2026-08-29T19:30:00.000Z'),
   ('chk-2026-08-29-dua-child-48', 'sch-sd-islam-01', 'child-48', 'dua', '2026-08-29', 'not_completed', 'user-parent-48', '2026-08-29T19:30:00.000Z', 'parent', 1, '2026-08-29T19:30:00.000Z', '2026-08-29T19:30:00.000Z'),
   ('chk-2026-08-29-kindness-child-50', 'sch-sd-islam-01', 'child-50', 'kindness', '2026-08-29', 'not_completed', 'user-parent-50', '2026-08-29T19:30:00.000Z', 'parent', 1, '2026-08-29T19:30:00.000Z', '2026-08-29T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -11450,7 +11613,7 @@ VALUES
   ('chk-2026-08-30-isha-child-04', 'sch-sd-islam-01', 'child-04', 'isha', '2026-08-30', 'completed', 'user-parent-04', '2026-08-30T19:30:00.000Z', 'parent', 1, '2026-08-30T19:30:00.000Z', '2026-08-30T19:30:00.000Z'),
   ('chk-2026-08-30-quran-child-03', 'sch-sd-islam-01', 'child-03', 'quran', '2026-08-30', 'completed', 'user-parent-03', '2026-08-30T19:30:00.000Z', 'parent', 1, '2026-08-30T19:30:00.000Z', '2026-08-30T19:30:00.000Z'),
   ('chk-2026-08-30-asr-child-10', 'sch-sd-islam-01', 'child-10', 'asr', '2026-08-30', 'completed', 'user-parent-10', '2026-08-30T19:30:00.000Z', 'parent', 1, '2026-08-30T19:30:00.000Z', '2026-08-30T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -11554,7 +11717,7 @@ VALUES
   ('chk-2026-08-30-dua-child-18', 'sch-sd-islam-01', 'child-18', 'dua', '2026-08-30', 'not_completed', 'user-parent-18', '2026-08-30T19:30:00.000Z', 'parent', 1, '2026-08-30T19:30:00.000Z', '2026-08-30T19:30:00.000Z'),
   ('chk-2026-08-30-dua-child-22', 'sch-sd-islam-01', 'child-22', 'dua', '2026-08-30', 'not_completed', 'user-parent-22', '2026-08-30T19:30:00.000Z', 'parent', 1, '2026-08-30T19:30:00.000Z', '2026-08-30T19:30:00.000Z'),
   ('chk-2026-08-30-dua-child-25', 'sch-sd-islam-01', 'child-25', 'dua', '2026-08-30', 'not_reported', 'user-parent-25', '2026-08-30T19:30:00.000Z', 'parent', 1, '2026-08-30T19:30:00.000Z', '2026-08-30T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -11658,7 +11821,7 @@ VALUES
   ('chk-2026-08-30-isha-child-31', 'sch-sd-islam-01', 'child-31', 'isha', '2026-08-30', 'completed', 'user-parent-31', '2026-08-30T19:30:00.000Z', 'parent', 1, '2026-08-30T19:30:00.000Z', '2026-08-30T19:30:00.000Z'),
   ('chk-2026-08-30-dhuhr-child-34', 'sch-sd-islam-01', 'child-34', 'dhuhr', '2026-08-30', 'completed', 'user-parent-34', '2026-08-30T19:30:00.000Z', 'parent', 1, '2026-08-30T19:30:00.000Z', '2026-08-30T19:30:00.000Z'),
   ('chk-2026-08-30-quran-child-37', 'sch-sd-islam-01', 'child-37', 'quran', '2026-08-30', 'completed', 'user-parent-37', '2026-08-30T19:30:00.000Z', 'parent', 1, '2026-08-30T19:30:00.000Z', '2026-08-30T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -11762,7 +11925,7 @@ VALUES
   ('chk-2026-08-30-quran-child-27', 'sch-sd-islam-01', 'child-27', 'quran', '2026-08-30', 'not_completed', 'user-parent-27', '2026-08-30T19:30:00.000Z', 'parent', 1, '2026-08-30T19:30:00.000Z', '2026-08-30T19:30:00.000Z'),
   ('chk-2026-08-30-kindness-child-44', 'sch-sd-islam-01', 'child-44', 'kindness', '2026-08-30', 'not_completed', 'user-parent-44', '2026-08-30T19:30:00.000Z', 'parent', 1, '2026-08-30T19:30:00.000Z', '2026-08-30T19:30:00.000Z'),
   ('chk-2026-08-30-dua-child-27', 'sch-sd-islam-01', 'child-27', 'dua', '2026-08-30', 'not_completed', 'user-parent-27', '2026-08-30T19:30:00.000Z', 'parent', 1, '2026-08-30T19:30:00.000Z', '2026-08-30T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -11866,7 +12029,7 @@ VALUES
   ('chk-2026-08-31-quran-child-24', 'sch-sd-islam-01', 'child-24', 'quran', '2026-08-31', 'completed', 'user-parent-24', '2026-08-31T19:30:00.000Z', 'parent', 1, '2026-08-31T19:30:00.000Z', '2026-08-31T19:30:00.000Z'),
   ('chk-2026-08-31-dua-child-18', 'sch-sd-islam-01', 'child-18', 'dua', '2026-08-31', 'completed', 'user-parent-18', '2026-08-31T19:30:00.000Z', 'parent', 1, '2026-08-31T19:30:00.000Z', '2026-08-31T19:30:00.000Z'),
   ('chk-2026-08-31-isha-child-22', 'sch-sd-islam-01', 'child-22', 'isha', '2026-08-31', 'completed', 'user-parent-22', '2026-08-31T19:30:00.000Z', 'parent', 1, '2026-08-31T19:30:00.000Z', '2026-08-31T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -11970,7 +12133,7 @@ VALUES
   ('chk-2026-08-31-kindness-child-03', 'sch-sd-islam-01', 'child-03', 'kindness', '2026-08-31', 'not_completed', 'user-parent-03', '2026-08-31T19:30:00.000Z', 'parent', 1, '2026-08-31T19:30:00.000Z', '2026-08-31T19:30:00.000Z'),
   ('chk-2026-08-31-kindness-child-16', 'sch-sd-islam-01', 'child-16', 'kindness', '2026-08-31', 'not_completed', 'user-parent-16', '2026-08-31T19:30:00.000Z', 'parent', 1, '2026-08-31T19:30:00.000Z', '2026-08-31T19:30:00.000Z'),
   ('chk-2026-08-31-kindness-child-13', 'sch-sd-islam-01', 'child-13', 'kindness', '2026-08-31', 'not_completed', 'user-parent-13', '2026-08-31T19:30:00.000Z', 'parent', 1, '2026-08-31T19:30:00.000Z', '2026-08-31T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -12074,7 +12237,7 @@ VALUES
   ('chk-2026-08-31-kindness-child-50', 'sch-sd-islam-01', 'child-50', 'kindness', '2026-08-31', 'completed', 'user-parent-50', '2026-08-31T19:30:00.000Z', 'parent', 1, '2026-08-31T19:30:00.000Z', '2026-08-31T19:30:00.000Z'),
   ('chk-2026-08-31-kindness-child-41', 'sch-sd-islam-01', 'child-41', 'kindness', '2026-08-31', 'completed', 'user-parent-41', '2026-08-31T19:30:00.000Z', 'parent', 1, '2026-08-31T19:30:00.000Z', '2026-08-31T19:30:00.000Z'),
   ('chk-2026-08-31-maghrib-child-27', 'sch-sd-islam-01', 'child-27', 'maghrib', '2026-08-31', 'completed', 'user-parent-27', '2026-08-31T19:30:00.000Z', 'parent', 1, '2026-08-31T19:30:00.000Z', '2026-08-31T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -12178,8 +12341,14 @@ VALUES
   ('chk-2026-08-31-kindness-child-27', 'sch-sd-islam-01', 'child-27', 'kindness', '2026-08-31', 'not_reported', 'user-parent-27', '2026-08-31T19:30:00.000Z', 'parent', 1, '2026-08-31T19:30:00.000Z', '2026-08-31T19:30:00.000Z'),
   ('chk-2026-08-31-dua-child-41', 'sch-sd-islam-01', 'child-41', 'dua', '2026-08-31', 'not_completed', 'user-parent-41', '2026-08-31T19:30:00.000Z', 'parent', 1, '2026-08-31T19:30:00.000Z', '2026-08-31T19:30:00.000Z'),
   ('chk-2026-08-31-dua-child-46', 'sch-sd-islam-01', 'child-46', 'dua', '2026-08-31', 'not_completed', 'user-parent-46', '2026-08-31T19:30:00.000Z', 'parent', 1, '2026-08-31T19:30:00.000Z', '2026-08-31T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
+
+-- =============================================================================
+-- BAGIAN 4 DARI 4: RIWAYAT CEKLIS PEKAN 5, 6, 7 (1 - 20 SEPTEMBER 2026) + POIN + STREAK
+-- =============================================================================
+
+-- DATA: checklist_entries (8000 rows)
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
   ('chk-2026-09-01-dhuhr-child-11', 'sch-sd-islam-01', 'child-11', 'dhuhr', '2026-09-01', 'completed', 'user-parent-11', '2026-09-01T19:30:00.000Z', 'parent', 1, '2026-09-01T19:30:00.000Z', '2026-09-01T19:30:00.000Z'),
@@ -12282,7 +12451,7 @@ VALUES
   ('chk-2026-09-01-isha-child-13', 'sch-sd-islam-01', 'child-13', 'isha', '2026-09-01', 'completed', 'user-parent-13', '2026-09-01T19:30:00.000Z', 'parent', 1, '2026-09-01T19:30:00.000Z', '2026-09-01T19:30:00.000Z'),
   ('chk-2026-09-01-dua-child-19', 'sch-sd-islam-01', 'child-19', 'dua', '2026-09-01', 'completed', 'user-parent-19', '2026-09-01T19:30:00.000Z', 'parent', 1, '2026-09-01T19:30:00.000Z', '2026-09-01T19:30:00.000Z'),
   ('chk-2026-09-01-asr-child-25', 'sch-sd-islam-01', 'child-25', 'asr', '2026-09-01', 'completed', 'user-parent-25', '2026-09-01T19:30:00.000Z', 'parent', 1, '2026-09-01T19:30:00.000Z', '2026-09-01T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -12386,7 +12555,7 @@ VALUES
   ('chk-2026-09-01-dua-child-25', 'sch-sd-islam-01', 'child-25', 'dua', '2026-09-01', 'not_completed', 'user-parent-25', '2026-09-01T19:30:00.000Z', 'parent', 1, '2026-09-01T19:30:00.000Z', '2026-09-01T19:30:00.000Z'),
   ('chk-2026-09-01-dua-child-17', 'sch-sd-islam-01', 'child-17', 'dua', '2026-09-01', 'not_completed', 'user-parent-17', '2026-09-01T19:30:00.000Z', 'parent', 1, '2026-09-01T19:30:00.000Z', '2026-09-01T19:30:00.000Z'),
   ('chk-2026-09-01-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-09-01', 'not_completed', 'user-parent-13', '2026-09-01T19:30:00.000Z', 'parent', 1, '2026-09-01T19:30:00.000Z', '2026-09-01T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -12490,7 +12659,7 @@ VALUES
   ('chk-2026-09-01-quran-child-40', 'sch-sd-islam-01', 'child-40', 'quran', '2026-09-01', 'completed', 'user-parent-40', '2026-09-01T19:30:00.000Z', 'parent', 1, '2026-09-01T19:30:00.000Z', '2026-09-01T19:30:00.000Z'),
   ('chk-2026-09-01-asr-child-44', 'sch-sd-islam-01', 'child-44', 'asr', '2026-09-01', 'completed', 'user-parent-44', '2026-09-01T19:30:00.000Z', 'parent', 1, '2026-09-01T19:30:00.000Z', '2026-09-01T19:30:00.000Z'),
   ('chk-2026-09-01-dhuhr-child-35', 'sch-sd-islam-01', 'child-35', 'dhuhr', '2026-09-01', 'completed', 'user-parent-35', '2026-09-01T19:30:00.000Z', 'parent', 1, '2026-09-01T19:30:00.000Z', '2026-09-01T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -12594,7 +12763,7 @@ VALUES
   ('chk-2026-09-01-dua-child-45', 'sch-sd-islam-01', 'child-45', 'dua', '2026-09-01', 'not_completed', 'user-parent-45', '2026-09-01T19:30:00.000Z', 'parent', 1, '2026-09-01T19:30:00.000Z', '2026-09-01T19:30:00.000Z'),
   ('chk-2026-09-01-dua-child-43', 'sch-sd-islam-01', 'child-43', 'dua', '2026-09-01', 'not_completed', 'user-parent-43', '2026-09-01T19:30:00.000Z', 'parent', 1, '2026-09-01T19:30:00.000Z', '2026-09-01T19:30:00.000Z'),
   ('chk-2026-09-01-dua-child-49', 'sch-sd-islam-01', 'child-49', 'dua', '2026-09-01', 'not_completed', 'user-parent-49', '2026-09-01T19:30:00.000Z', 'parent', 1, '2026-09-01T19:30:00.000Z', '2026-09-01T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -12698,7 +12867,7 @@ VALUES
   ('chk-2026-09-02-dua-child-22', 'sch-sd-islam-01', 'child-22', 'dua', '2026-09-02', 'completed', 'user-parent-22', '2026-09-02T19:30:00.000Z', 'parent', 1, '2026-09-02T19:30:00.000Z', '2026-09-02T19:30:00.000Z'),
   ('chk-2026-09-02-kindness-child-01', 'sch-sd-islam-01', 'child-01', 'kindness', '2026-09-02', 'completed', 'user-parent-01', '2026-09-02T19:30:00.000Z', 'parent', 1, '2026-09-02T19:30:00.000Z', '2026-09-02T19:30:00.000Z'),
   ('chk-2026-09-02-dhuhr-child-03', 'sch-sd-islam-01', 'child-03', 'dhuhr', '2026-09-02', 'completed', 'user-parent-03', '2026-09-02T19:30:00.000Z', 'parent', 1, '2026-09-02T19:30:00.000Z', '2026-09-02T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -12802,7 +12971,7 @@ VALUES
   ('chk-2026-09-02-dua-child-04', 'sch-sd-islam-01', 'child-04', 'dua', '2026-09-02', 'not_completed', 'user-parent-04', '2026-09-02T19:30:00.000Z', 'parent', 1, '2026-09-02T19:30:00.000Z', '2026-09-02T19:30:00.000Z'),
   ('chk-2026-09-02-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-09-02', 'not_completed', 'user-parent-13', '2026-09-02T19:30:00.000Z', 'parent', 1, '2026-09-02T19:30:00.000Z', '2026-09-02T19:30:00.000Z'),
   ('chk-2026-09-02-kindness-child-05', 'sch-sd-islam-01', 'child-05', 'kindness', '2026-09-02', 'not_completed', 'user-parent-05', '2026-09-02T19:30:00.000Z', 'parent', 1, '2026-09-02T19:30:00.000Z', '2026-09-02T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -12906,7 +13075,7 @@ VALUES
   ('chk-2026-09-02-isha-child-28', 'sch-sd-islam-01', 'child-28', 'isha', '2026-09-02', 'completed', 'user-parent-28', '2026-09-02T19:30:00.000Z', 'parent', 1, '2026-09-02T19:30:00.000Z', '2026-09-02T19:30:00.000Z'),
   ('chk-2026-09-02-maghrib-child-43', 'sch-sd-islam-01', 'child-43', 'maghrib', '2026-09-02', 'completed', 'user-parent-43', '2026-09-02T19:30:00.000Z', 'parent', 1, '2026-09-02T19:30:00.000Z', '2026-09-02T19:30:00.000Z'),
   ('chk-2026-09-02-dua-child-50', 'sch-sd-islam-01', 'child-50', 'dua', '2026-09-02', 'completed', 'user-parent-50', '2026-09-02T19:30:00.000Z', 'parent', 1, '2026-09-02T19:30:00.000Z', '2026-09-02T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -13010,7 +13179,7 @@ VALUES
   ('chk-2026-09-02-dua-child-29', 'sch-sd-islam-01', 'child-29', 'dua', '2026-09-02', 'not_completed', 'user-parent-29', '2026-09-02T19:30:00.000Z', 'parent', 1, '2026-09-02T19:30:00.000Z', '2026-09-02T19:30:00.000Z'),
   ('chk-2026-09-02-dua-child-44', 'sch-sd-islam-01', 'child-44', 'dua', '2026-09-02', 'not_reported', 'user-parent-44', '2026-09-02T19:30:00.000Z', 'parent', 1, '2026-09-02T19:30:00.000Z', '2026-09-02T19:30:00.000Z'),
   ('chk-2026-09-02-kindness-child-45', 'sch-sd-islam-01', 'child-45', 'kindness', '2026-09-02', 'not_completed', 'user-parent-45', '2026-09-02T19:30:00.000Z', 'parent', 1, '2026-09-02T19:30:00.000Z', '2026-09-02T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -13114,7 +13283,7 @@ VALUES
   ('chk-2026-09-03-quran-child-03', 'sch-sd-islam-01', 'child-03', 'quran', '2026-09-03', 'completed', 'user-parent-03', '2026-09-03T19:30:00.000Z', 'parent', 1, '2026-09-03T19:30:00.000Z', '2026-09-03T19:30:00.000Z'),
   ('chk-2026-09-03-dhuhr-child-01', 'sch-sd-islam-01', 'child-01', 'dhuhr', '2026-09-03', 'completed', 'user-parent-01', '2026-09-03T19:30:00.000Z', 'parent', 1, '2026-09-03T19:30:00.000Z', '2026-09-03T19:30:00.000Z'),
   ('chk-2026-09-03-quran-child-24', 'sch-sd-islam-01', 'child-24', 'quran', '2026-09-03', 'completed', 'user-parent-24', '2026-09-03T19:30:00.000Z', 'parent', 1, '2026-09-03T19:30:00.000Z', '2026-09-03T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -13218,7 +13387,7 @@ VALUES
   ('chk-2026-09-03-quran-child-04', 'sch-sd-islam-01', 'child-04', 'quran', '2026-09-03', 'not_completed', 'user-parent-04', '2026-09-03T19:30:00.000Z', 'parent', 1, '2026-09-03T19:30:00.000Z', '2026-09-03T19:30:00.000Z'),
   ('chk-2026-09-03-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-09-03', 'not_completed', 'user-parent-13', '2026-09-03T19:30:00.000Z', 'parent', 1, '2026-09-03T19:30:00.000Z', '2026-09-03T19:30:00.000Z'),
   ('chk-2026-09-03-quran-child-05', 'sch-sd-islam-01', 'child-05', 'quran', '2026-09-03', 'not_completed', 'user-parent-05', '2026-09-03T19:30:00.000Z', 'parent', 1, '2026-09-03T19:30:00.000Z', '2026-09-03T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -13322,7 +13491,7 @@ VALUES
   ('chk-2026-09-03-isha-child-41', 'sch-sd-islam-01', 'child-41', 'isha', '2026-09-03', 'completed', 'user-parent-41', '2026-09-03T19:30:00.000Z', 'parent', 1, '2026-09-03T19:30:00.000Z', '2026-09-03T19:30:00.000Z'),
   ('chk-2026-09-03-maghrib-child-39', 'sch-sd-islam-01', 'child-39', 'maghrib', '2026-09-03', 'completed', 'user-parent-39', '2026-09-03T19:30:00.000Z', 'parent', 1, '2026-09-03T19:30:00.000Z', '2026-09-03T19:30:00.000Z'),
   ('chk-2026-09-03-fajr-child-38', 'sch-sd-islam-01', 'child-38', 'fajr', '2026-09-03', 'completed', 'user-parent-38', '2026-09-03T19:30:00.000Z', 'parent', 1, '2026-09-03T19:30:00.000Z', '2026-09-03T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -13426,7 +13595,7 @@ VALUES
   ('chk-2026-09-03-isha-child-50', 'sch-sd-islam-01', 'child-50', 'isha', '2026-09-03', 'not_completed', 'user-parent-50', '2026-09-03T19:30:00.000Z', 'parent', 1, '2026-09-03T19:30:00.000Z', '2026-09-03T19:30:00.000Z'),
   ('chk-2026-09-03-dua-child-37', 'sch-sd-islam-01', 'child-37', 'dua', '2026-09-03', 'not_completed', 'user-parent-37', '2026-09-03T19:30:00.000Z', 'parent', 1, '2026-09-03T19:30:00.000Z', '2026-09-03T19:30:00.000Z'),
   ('chk-2026-09-03-dua-child-27', 'sch-sd-islam-01', 'child-27', 'dua', '2026-09-03', 'not_completed', 'user-parent-27', '2026-09-03T19:30:00.000Z', 'parent', 1, '2026-09-03T19:30:00.000Z', '2026-09-03T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -13530,7 +13699,7 @@ VALUES
   ('chk-2026-09-04-dua-child-22', 'sch-sd-islam-01', 'child-22', 'dua', '2026-09-04', 'completed', 'user-parent-22', '2026-09-04T19:30:00.000Z', 'parent', 1, '2026-09-04T19:30:00.000Z', '2026-09-04T19:30:00.000Z'),
   ('chk-2026-09-04-dhuhr-child-14', 'sch-sd-islam-01', 'child-14', 'dhuhr', '2026-09-04', 'completed', 'user-parent-14', '2026-09-04T19:30:00.000Z', 'parent', 1, '2026-09-04T19:30:00.000Z', '2026-09-04T19:30:00.000Z'),
   ('chk-2026-09-04-dhuhr-child-16', 'sch-sd-islam-01', 'child-16', 'dhuhr', '2026-09-04', 'completed', 'user-parent-16', '2026-09-04T19:30:00.000Z', 'parent', 1, '2026-09-04T19:30:00.000Z', '2026-09-04T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -13634,7 +13803,7 @@ VALUES
   ('chk-2026-09-04-asr-child-05', 'sch-sd-islam-01', 'child-05', 'asr', '2026-09-04', 'not_completed', 'user-parent-05', '2026-09-04T19:30:00.000Z', 'parent', 1, '2026-09-04T19:30:00.000Z', '2026-09-04T19:30:00.000Z'),
   ('chk-2026-09-04-dua-child-16', 'sch-sd-islam-01', 'child-16', 'dua', '2026-09-04', 'not_completed', 'user-parent-16', '2026-09-04T19:30:00.000Z', 'parent', 1, '2026-09-04T19:30:00.000Z', '2026-09-04T19:30:00.000Z'),
   ('chk-2026-09-04-dua-child-04', 'sch-sd-islam-01', 'child-04', 'dua', '2026-09-04', 'not_completed', 'user-parent-04', '2026-09-04T19:30:00.000Z', 'parent', 1, '2026-09-04T19:30:00.000Z', '2026-09-04T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -13738,7 +13907,7 @@ VALUES
   ('chk-2026-09-04-quran-child-30', 'sch-sd-islam-01', 'child-30', 'quran', '2026-09-04', 'completed', 'user-parent-30', '2026-09-04T19:30:00.000Z', 'parent', 1, '2026-09-04T19:30:00.000Z', '2026-09-04T19:30:00.000Z'),
   ('chk-2026-09-04-fajr-child-47', 'sch-sd-islam-01', 'child-47', 'fajr', '2026-09-04', 'completed', 'user-parent-47', '2026-09-04T19:30:00.000Z', 'parent', 1, '2026-09-04T19:30:00.000Z', '2026-09-04T19:30:00.000Z'),
   ('chk-2026-09-04-asr-child-47', 'sch-sd-islam-01', 'child-47', 'asr', '2026-09-04', 'completed', 'user-parent-47', '2026-09-04T19:30:00.000Z', 'parent', 1, '2026-09-04T19:30:00.000Z', '2026-09-04T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -13842,7 +14011,7 @@ VALUES
   ('chk-2026-09-04-dua-child-46', 'sch-sd-islam-01', 'child-46', 'dua', '2026-09-04', 'not_completed', 'user-parent-46', '2026-09-04T19:30:00.000Z', 'parent', 1, '2026-09-04T19:30:00.000Z', '2026-09-04T19:30:00.000Z'),
   ('chk-2026-09-04-dua-child-37', 'sch-sd-islam-01', 'child-37', 'dua', '2026-09-04', 'not_completed', 'user-parent-37', '2026-09-04T19:30:00.000Z', 'parent', 1, '2026-09-04T19:30:00.000Z', '2026-09-04T19:30:00.000Z'),
   ('chk-2026-09-04-kindness-child-50', 'sch-sd-islam-01', 'child-50', 'kindness', '2026-09-04', 'not_completed', 'user-parent-50', '2026-09-04T19:30:00.000Z', 'parent', 1, '2026-09-04T19:30:00.000Z', '2026-09-04T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -13946,7 +14115,7 @@ VALUES
   ('chk-2026-09-05-kindness-child-02', 'sch-sd-islam-01', 'child-02', 'kindness', '2026-09-05', 'completed', 'user-parent-02', '2026-09-05T19:30:00.000Z', 'parent', 1, '2026-09-05T19:30:00.000Z', '2026-09-05T19:30:00.000Z'),
   ('chk-2026-09-05-kindness-child-21', 'sch-sd-islam-01', 'child-21', 'kindness', '2026-09-05', 'completed', 'user-parent-21', '2026-09-05T19:30:00.000Z', 'parent', 1, '2026-09-05T19:30:00.000Z', '2026-09-05T19:30:00.000Z'),
   ('chk-2026-09-05-maghrib-child-17', 'sch-sd-islam-01', 'child-17', 'maghrib', '2026-09-05', 'completed', 'user-parent-17', '2026-09-05T19:30:00.000Z', 'parent', 1, '2026-09-05T19:30:00.000Z', '2026-09-05T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -14050,7 +14219,7 @@ VALUES
   ('chk-2026-09-05-dua-child-05', 'sch-sd-islam-01', 'child-05', 'dua', '2026-09-05', 'not_completed', 'user-parent-05', '2026-09-05T19:30:00.000Z', 'parent', 1, '2026-09-05T19:30:00.000Z', '2026-09-05T19:30:00.000Z'),
   ('chk-2026-09-05-kindness-child-13', 'sch-sd-islam-01', 'child-13', 'kindness', '2026-09-05', 'not_completed', 'user-parent-13', '2026-09-05T19:30:00.000Z', 'parent', 1, '2026-09-05T19:30:00.000Z', '2026-09-05T19:30:00.000Z'),
   ('chk-2026-09-05-dua-child-17', 'sch-sd-islam-01', 'child-17', 'dua', '2026-09-05', 'not_completed', 'user-parent-17', '2026-09-05T19:30:00.000Z', 'parent', 1, '2026-09-05T19:30:00.000Z', '2026-09-05T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -14154,7 +14323,7 @@ VALUES
   ('chk-2026-09-05-maghrib-child-50', 'sch-sd-islam-01', 'child-50', 'maghrib', '2026-09-05', 'completed', 'user-parent-50', '2026-09-05T19:30:00.000Z', 'parent', 1, '2026-09-05T19:30:00.000Z', '2026-09-05T19:30:00.000Z'),
   ('chk-2026-09-05-isha-child-28', 'sch-sd-islam-01', 'child-28', 'isha', '2026-09-05', 'completed', 'user-parent-28', '2026-09-05T19:30:00.000Z', 'parent', 1, '2026-09-05T19:30:00.000Z', '2026-09-05T19:30:00.000Z'),
   ('chk-2026-09-05-kindness-child-40', 'sch-sd-islam-01', 'child-40', 'kindness', '2026-09-05', 'completed', 'user-parent-40', '2026-09-05T19:30:00.000Z', 'parent', 1, '2026-09-05T19:30:00.000Z', '2026-09-05T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -14258,7 +14427,7 @@ VALUES
   ('chk-2026-09-05-dua-child-45', 'sch-sd-islam-01', 'child-45', 'dua', '2026-09-05', 'not_completed', 'user-parent-45', '2026-09-05T19:30:00.000Z', 'parent', 1, '2026-09-05T19:30:00.000Z', '2026-09-05T19:30:00.000Z'),
   ('chk-2026-09-05-kindness-child-41', 'sch-sd-islam-01', 'child-41', 'kindness', '2026-09-05', 'not_completed', 'user-parent-41', '2026-09-05T19:30:00.000Z', 'parent', 1, '2026-09-05T19:30:00.000Z', '2026-09-05T19:30:00.000Z'),
   ('chk-2026-09-05-dua-child-50', 'sch-sd-islam-01', 'child-50', 'dua', '2026-09-05', 'not_completed', 'user-parent-50', '2026-09-05T19:30:00.000Z', 'parent', 1, '2026-09-05T19:30:00.000Z', '2026-09-05T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -14362,7 +14531,7 @@ VALUES
   ('chk-2026-09-06-maghrib-child-05', 'sch-sd-islam-01', 'child-05', 'maghrib', '2026-09-06', 'completed', 'user-parent-05', '2026-09-06T19:30:00.000Z', 'parent', 1, '2026-09-06T19:30:00.000Z', '2026-09-06T19:30:00.000Z'),
   ('chk-2026-09-06-asr-child-20', 'sch-sd-islam-01', 'child-20', 'asr', '2026-09-06', 'completed', 'user-parent-20', '2026-09-06T19:30:00.000Z', 'parent', 1, '2026-09-06T19:30:00.000Z', '2026-09-06T19:30:00.000Z'),
   ('chk-2026-09-06-dhuhr-child-22', 'sch-sd-islam-01', 'child-22', 'dhuhr', '2026-09-06', 'completed', 'user-parent-22', '2026-09-06T19:30:00.000Z', 'parent', 1, '2026-09-06T19:30:00.000Z', '2026-09-06T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -14466,7 +14635,7 @@ VALUES
   ('chk-2026-09-06-kindness-child-04', 'sch-sd-islam-01', 'child-04', 'kindness', '2026-09-06', 'not_reported', 'user-parent-04', '2026-09-06T19:30:00.000Z', 'parent', 1, '2026-09-06T19:30:00.000Z', '2026-09-06T19:30:00.000Z'),
   ('chk-2026-09-06-kindness-child-05', 'sch-sd-islam-01', 'child-05', 'kindness', '2026-09-06', 'not_completed', 'user-parent-05', '2026-09-06T19:30:00.000Z', 'parent', 1, '2026-09-06T19:30:00.000Z', '2026-09-06T19:30:00.000Z'),
   ('chk-2026-09-06-dua-child-05', 'sch-sd-islam-01', 'child-05', 'dua', '2026-09-06', 'not_completed', 'user-parent-05', '2026-09-06T19:30:00.000Z', 'parent', 1, '2026-09-06T19:30:00.000Z', '2026-09-06T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -14570,7 +14739,7 @@ VALUES
   ('chk-2026-09-06-isha-child-31', 'sch-sd-islam-01', 'child-31', 'isha', '2026-09-06', 'completed', 'user-parent-31', '2026-09-06T19:30:00.000Z', 'parent', 1, '2026-09-06T19:30:00.000Z', '2026-09-06T19:30:00.000Z'),
   ('chk-2026-09-06-fajr-child-38', 'sch-sd-islam-01', 'child-38', 'fajr', '2026-09-06', 'completed', 'user-parent-38', '2026-09-06T19:30:00.000Z', 'parent', 1, '2026-09-06T19:30:00.000Z', '2026-09-06T19:30:00.000Z'),
   ('chk-2026-09-06-dhuhr-child-29', 'sch-sd-islam-01', 'child-29', 'dhuhr', '2026-09-06', 'completed', 'user-parent-29', '2026-09-06T19:30:00.000Z', 'parent', 1, '2026-09-06T19:30:00.000Z', '2026-09-06T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -14674,7 +14843,7 @@ VALUES
   ('chk-2026-09-06-dua-child-26', 'sch-sd-islam-01', 'child-26', 'dua', '2026-09-06', 'not_completed', 'user-parent-26', '2026-09-06T19:30:00.000Z', 'parent', 1, '2026-09-06T19:30:00.000Z', '2026-09-06T19:30:00.000Z'),
   ('chk-2026-09-06-dua-child-45', 'sch-sd-islam-01', 'child-45', 'dua', '2026-09-06', 'not_completed', 'user-parent-45', '2026-09-06T19:30:00.000Z', 'parent', 1, '2026-09-06T19:30:00.000Z', '2026-09-06T19:30:00.000Z'),
   ('chk-2026-09-06-dua-child-44', 'sch-sd-islam-01', 'child-44', 'dua', '2026-09-06', 'not_completed', 'user-parent-44', '2026-09-06T19:30:00.000Z', 'parent', 1, '2026-09-06T19:30:00.000Z', '2026-09-06T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -14778,7 +14947,7 @@ VALUES
   ('chk-2026-09-07-fajr-child-24', 'sch-sd-islam-01', 'child-24', 'fajr', '2026-09-07', 'completed', 'user-parent-24', '2026-09-07T19:30:00.000Z', 'parent', 1, '2026-09-07T19:30:00.000Z', '2026-09-07T19:30:00.000Z'),
   ('chk-2026-09-07-kindness-child-01', 'sch-sd-islam-01', 'child-01', 'kindness', '2026-09-07', 'completed', 'user-parent-01', '2026-09-07T19:30:00.000Z', 'parent', 1, '2026-09-07T19:30:00.000Z', '2026-09-07T19:30:00.000Z'),
   ('chk-2026-09-07-dhuhr-child-09', 'sch-sd-islam-01', 'child-09', 'dhuhr', '2026-09-07', 'completed', 'user-parent-09', '2026-09-07T19:30:00.000Z', 'parent', 1, '2026-09-07T19:30:00.000Z', '2026-09-07T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -14882,7 +15051,7 @@ VALUES
   ('chk-2026-09-07-kindness-child-14', 'sch-sd-islam-01', 'child-14', 'kindness', '2026-09-07', 'not_completed', 'user-parent-14', '2026-09-07T19:30:00.000Z', 'parent', 1, '2026-09-07T19:30:00.000Z', '2026-09-07T19:30:00.000Z'),
   ('chk-2026-09-07-quran-child-13', 'sch-sd-islam-01', 'child-13', 'quran', '2026-09-07', 'not_completed', 'user-parent-13', '2026-09-07T19:30:00.000Z', 'parent', 1, '2026-09-07T19:30:00.000Z', '2026-09-07T19:30:00.000Z'),
   ('chk-2026-09-07-dua-child-18', 'sch-sd-islam-01', 'child-18', 'dua', '2026-09-07', 'not_reported', 'user-parent-18', '2026-09-07T19:30:00.000Z', 'parent', 1, '2026-09-07T19:30:00.000Z', '2026-09-07T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -14986,7 +15155,7 @@ VALUES
   ('chk-2026-09-07-fajr-child-26', 'sch-sd-islam-01', 'child-26', 'fajr', '2026-09-07', 'completed', 'user-parent-26', '2026-09-07T19:30:00.000Z', 'parent', 1, '2026-09-07T19:30:00.000Z', '2026-09-07T19:30:00.000Z'),
   ('chk-2026-09-07-dhuhr-child-35', 'sch-sd-islam-01', 'child-35', 'dhuhr', '2026-09-07', 'completed', 'user-parent-35', '2026-09-07T19:30:00.000Z', 'parent', 1, '2026-09-07T19:30:00.000Z', '2026-09-07T19:30:00.000Z'),
   ('chk-2026-09-07-kindness-child-44', 'sch-sd-islam-01', 'child-44', 'kindness', '2026-09-07', 'completed', 'user-parent-44', '2026-09-07T19:30:00.000Z', 'parent', 1, '2026-09-07T19:30:00.000Z', '2026-09-07T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -15090,7 +15259,7 @@ VALUES
   ('chk-2026-09-07-kindness-child-38', 'sch-sd-islam-01', 'child-38', 'kindness', '2026-09-07', 'not_completed', 'user-parent-38', '2026-09-07T19:30:00.000Z', 'parent', 1, '2026-09-07T19:30:00.000Z', '2026-09-07T19:30:00.000Z'),
   ('chk-2026-09-07-isha-child-50', 'sch-sd-islam-01', 'child-50', 'isha', '2026-09-07', 'not_completed', 'user-parent-50', '2026-09-07T19:30:00.000Z', 'parent', 1, '2026-09-07T19:30:00.000Z', '2026-09-07T19:30:00.000Z'),
   ('chk-2026-09-07-dua-child-49', 'sch-sd-islam-01', 'child-49', 'dua', '2026-09-07', 'not_completed', 'user-parent-49', '2026-09-07T19:30:00.000Z', 'parent', 1, '2026-09-07T19:30:00.000Z', '2026-09-07T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -15194,7 +15363,7 @@ VALUES
   ('chk-2026-09-08-dua-child-12', 'sch-sd-islam-01', 'child-12', 'dua', '2026-09-08', 'completed', 'user-parent-12', '2026-09-08T19:30:00.000Z', 'parent', 1, '2026-09-08T19:30:00.000Z', '2026-09-08T19:30:00.000Z'),
   ('chk-2026-09-08-maghrib-child-01', 'sch-sd-islam-01', 'child-01', 'maghrib', '2026-09-08', 'completed', 'user-parent-01', '2026-09-08T19:30:00.000Z', 'parent', 1, '2026-09-08T19:30:00.000Z', '2026-09-08T19:30:00.000Z'),
   ('chk-2026-09-08-dua-child-17', 'sch-sd-islam-01', 'child-17', 'dua', '2026-09-08', 'completed', 'user-parent-17', '2026-09-08T19:30:00.000Z', 'parent', 1, '2026-09-08T19:30:00.000Z', '2026-09-08T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -15298,7 +15467,7 @@ VALUES
   ('chk-2026-09-08-dua-child-14', 'sch-sd-islam-01', 'child-14', 'dua', '2026-09-08', 'not_completed', 'user-parent-14', '2026-09-08T19:30:00.000Z', 'parent', 1, '2026-09-08T19:30:00.000Z', '2026-09-08T19:30:00.000Z'),
   ('chk-2026-09-08-dua-child-16', 'sch-sd-islam-01', 'child-16', 'dua', '2026-09-08', 'not_completed', 'user-parent-16', '2026-09-08T19:30:00.000Z', 'parent', 1, '2026-09-08T19:30:00.000Z', '2026-09-08T19:30:00.000Z'),
   ('chk-2026-09-08-dua-child-25', 'sch-sd-islam-01', 'child-25', 'dua', '2026-09-08', 'not_completed', 'user-parent-25', '2026-09-08T19:30:00.000Z', 'parent', 1, '2026-09-08T19:30:00.000Z', '2026-09-08T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -15402,7 +15571,7 @@ VALUES
   ('chk-2026-09-08-quran-child-35', 'sch-sd-islam-01', 'child-35', 'quran', '2026-09-08', 'completed', 'user-parent-35', '2026-09-08T19:30:00.000Z', 'parent', 1, '2026-09-08T19:30:00.000Z', '2026-09-08T19:30:00.000Z'),
   ('chk-2026-09-08-dua-child-44', 'sch-sd-islam-01', 'child-44', 'dua', '2026-09-08', 'completed', 'user-parent-44', '2026-09-08T19:30:00.000Z', 'parent', 1, '2026-09-08T19:30:00.000Z', '2026-09-08T19:30:00.000Z'),
   ('chk-2026-09-08-asr-child-32', 'sch-sd-islam-01', 'child-32', 'asr', '2026-09-08', 'completed', 'user-parent-32', '2026-09-08T19:30:00.000Z', 'parent', 1, '2026-09-08T19:30:00.000Z', '2026-09-08T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -15506,7 +15675,7 @@ VALUES
   ('chk-2026-09-08-kindness-child-28', 'sch-sd-islam-01', 'child-28', 'kindness', '2026-09-08', 'not_completed', 'user-parent-28', '2026-09-08T19:30:00.000Z', 'parent', 1, '2026-09-08T19:30:00.000Z', '2026-09-08T19:30:00.000Z'),
   ('chk-2026-09-08-quran-child-50', 'sch-sd-islam-01', 'child-50', 'quran', '2026-09-08', 'not_completed', 'user-parent-50', '2026-09-08T19:30:00.000Z', 'parent', 1, '2026-09-08T19:30:00.000Z', '2026-09-08T19:30:00.000Z'),
   ('chk-2026-09-08-dua-child-46', 'sch-sd-islam-01', 'child-46', 'dua', '2026-09-08', 'not_completed', 'user-parent-46', '2026-09-08T19:30:00.000Z', 'parent', 1, '2026-09-08T19:30:00.000Z', '2026-09-08T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -15610,7 +15779,7 @@ VALUES
   ('chk-2026-09-09-isha-child-14', 'sch-sd-islam-01', 'child-14', 'isha', '2026-09-09', 'completed', 'user-parent-14', '2026-09-09T19:30:00.000Z', 'parent', 1, '2026-09-09T19:30:00.000Z', '2026-09-09T19:30:00.000Z'),
   ('chk-2026-09-09-maghrib-child-25', 'sch-sd-islam-01', 'child-25', 'maghrib', '2026-09-09', 'completed', 'user-parent-25', '2026-09-09T19:30:00.000Z', 'parent', 1, '2026-09-09T19:30:00.000Z', '2026-09-09T19:30:00.000Z'),
   ('chk-2026-09-09-asr-child-08', 'sch-sd-islam-01', 'child-08', 'asr', '2026-09-09', 'completed', 'user-parent-08', '2026-09-09T19:30:00.000Z', 'parent', 1, '2026-09-09T19:30:00.000Z', '2026-09-09T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -15714,7 +15883,7 @@ VALUES
   ('chk-2026-09-09-dua-child-04', 'sch-sd-islam-01', 'child-04', 'dua', '2026-09-09', 'not_completed', 'user-parent-04', '2026-09-09T19:30:00.000Z', 'parent', 1, '2026-09-09T19:30:00.000Z', '2026-09-09T19:30:00.000Z'),
   ('chk-2026-09-09-dua-child-16', 'sch-sd-islam-01', 'child-16', 'dua', '2026-09-09', 'not_completed', 'user-parent-16', '2026-09-09T19:30:00.000Z', 'parent', 1, '2026-09-09T19:30:00.000Z', '2026-09-09T19:30:00.000Z'),
   ('chk-2026-09-09-dua-child-05', 'sch-sd-islam-01', 'child-05', 'dua', '2026-09-09', 'not_completed', 'user-parent-05', '2026-09-09T19:30:00.000Z', 'parent', 1, '2026-09-09T19:30:00.000Z', '2026-09-09T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -15818,7 +15987,7 @@ VALUES
   ('chk-2026-09-09-dua-child-30', 'sch-sd-islam-01', 'child-30', 'dua', '2026-09-09', 'completed', 'user-parent-30', '2026-09-09T19:30:00.000Z', 'parent', 1, '2026-09-09T19:30:00.000Z', '2026-09-09T19:30:00.000Z'),
   ('chk-2026-09-09-asr-child-50', 'sch-sd-islam-01', 'child-50', 'asr', '2026-09-09', 'completed', 'user-parent-50', '2026-09-09T19:30:00.000Z', 'parent', 1, '2026-09-09T19:30:00.000Z', '2026-09-09T19:30:00.000Z'),
   ('chk-2026-09-09-kindness-child-44', 'sch-sd-islam-01', 'child-44', 'kindness', '2026-09-09', 'completed', 'user-parent-44', '2026-09-09T19:30:00.000Z', 'parent', 1, '2026-09-09T19:30:00.000Z', '2026-09-09T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -15922,7 +16091,7 @@ VALUES
   ('chk-2026-09-09-dua-child-31', 'sch-sd-islam-01', 'child-31', 'dua', '2026-09-09', 'not_completed', 'user-parent-31', '2026-09-09T19:30:00.000Z', 'parent', 1, '2026-09-09T19:30:00.000Z', '2026-09-09T19:30:00.000Z'),
   ('chk-2026-09-09-dua-child-41', 'sch-sd-islam-01', 'child-41', 'dua', '2026-09-09', 'not_completed', 'user-parent-41', '2026-09-09T19:30:00.000Z', 'parent', 1, '2026-09-09T19:30:00.000Z', '2026-09-09T19:30:00.000Z'),
   ('chk-2026-09-09-kindness-child-27', 'sch-sd-islam-01', 'child-27', 'kindness', '2026-09-09', 'not_completed', 'user-parent-27', '2026-09-09T19:30:00.000Z', 'parent', 1, '2026-09-09T19:30:00.000Z', '2026-09-09T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -16026,7 +16195,7 @@ VALUES
   ('chk-2026-09-10-fajr-child-12', 'sch-sd-islam-01', 'child-12', 'fajr', '2026-09-10', 'completed', 'user-parent-12', '2026-09-10T19:30:00.000Z', 'parent', 1, '2026-09-10T19:30:00.000Z', '2026-09-10T19:30:00.000Z'),
   ('chk-2026-09-10-fajr-child-24', 'sch-sd-islam-01', 'child-24', 'fajr', '2026-09-10', 'completed', 'user-parent-24', '2026-09-10T19:30:00.000Z', 'parent', 1, '2026-09-10T19:30:00.000Z', '2026-09-10T19:30:00.000Z'),
   ('chk-2026-09-10-asr-child-02', 'sch-sd-islam-01', 'child-02', 'asr', '2026-09-10', 'completed', 'user-parent-02', '2026-09-10T19:30:00.000Z', 'parent', 1, '2026-09-10T19:30:00.000Z', '2026-09-10T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -16130,7 +16299,7 @@ VALUES
   ('chk-2026-09-10-dua-child-25', 'sch-sd-islam-01', 'child-25', 'dua', '2026-09-10', 'not_completed', 'user-parent-25', '2026-09-10T19:30:00.000Z', 'parent', 1, '2026-09-10T19:30:00.000Z', '2026-09-10T19:30:00.000Z'),
   ('chk-2026-09-10-dua-child-22', 'sch-sd-islam-01', 'child-22', 'dua', '2026-09-10', 'not_completed', 'user-parent-22', '2026-09-10T19:30:00.000Z', 'parent', 1, '2026-09-10T19:30:00.000Z', '2026-09-10T19:30:00.000Z'),
   ('chk-2026-09-10-dua-child-05', 'sch-sd-islam-01', 'child-05', 'dua', '2026-09-10', 'not_completed', 'user-parent-05', '2026-09-10T19:30:00.000Z', 'parent', 1, '2026-09-10T19:30:00.000Z', '2026-09-10T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -16234,7 +16403,7 @@ VALUES
   ('chk-2026-09-10-isha-child-42', 'sch-sd-islam-01', 'child-42', 'isha', '2026-09-10', 'completed', 'user-parent-42', '2026-09-10T19:30:00.000Z', 'parent', 1, '2026-09-10T19:30:00.000Z', '2026-09-10T19:30:00.000Z'),
   ('chk-2026-09-10-dua-child-32', 'sch-sd-islam-01', 'child-32', 'dua', '2026-09-10', 'completed', 'user-parent-32', '2026-09-10T19:30:00.000Z', 'parent', 1, '2026-09-10T19:30:00.000Z', '2026-09-10T19:30:00.000Z'),
   ('chk-2026-09-10-fajr-child-43', 'sch-sd-islam-01', 'child-43', 'fajr', '2026-09-10', 'completed', 'user-parent-43', '2026-09-10T19:30:00.000Z', 'parent', 1, '2026-09-10T19:30:00.000Z', '2026-09-10T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -16338,7 +16507,7 @@ VALUES
   ('chk-2026-09-10-dua-child-41', 'sch-sd-islam-01', 'child-41', 'dua', '2026-09-10', 'not_completed', 'user-parent-41', '2026-09-10T19:30:00.000Z', 'parent', 1, '2026-09-10T19:30:00.000Z', '2026-09-10T19:30:00.000Z'),
   ('chk-2026-09-10-kindness-child-50', 'sch-sd-islam-01', 'child-50', 'kindness', '2026-09-10', 'not_reported', 'user-parent-50', '2026-09-10T19:30:00.000Z', 'parent', 1, '2026-09-10T19:30:00.000Z', '2026-09-10T19:30:00.000Z'),
   ('chk-2026-09-10-kindness-child-41', 'sch-sd-islam-01', 'child-41', 'kindness', '2026-09-10', 'not_completed', 'user-parent-41', '2026-09-10T19:30:00.000Z', 'parent', 1, '2026-09-10T19:30:00.000Z', '2026-09-10T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -16442,7 +16611,7 @@ VALUES
   ('chk-2026-09-11-asr-child-22', 'sch-sd-islam-01', 'child-22', 'asr', '2026-09-11', 'completed', 'user-parent-22', '2026-09-11T19:30:00.000Z', 'parent', 1, '2026-09-11T19:30:00.000Z', '2026-09-11T19:30:00.000Z'),
   ('chk-2026-09-11-dua-child-14', 'sch-sd-islam-01', 'child-14', 'dua', '2026-09-11', 'completed', 'user-parent-14', '2026-09-11T19:30:00.000Z', 'parent', 1, '2026-09-11T19:30:00.000Z', '2026-09-11T19:30:00.000Z'),
   ('chk-2026-09-11-isha-child-14', 'sch-sd-islam-01', 'child-14', 'isha', '2026-09-11', 'completed', 'user-parent-14', '2026-09-11T19:30:00.000Z', 'parent', 1, '2026-09-11T19:30:00.000Z', '2026-09-11T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -16546,7 +16715,7 @@ VALUES
   ('chk-2026-09-11-dua-child-09', 'sch-sd-islam-01', 'child-09', 'dua', '2026-09-11', 'not_completed', 'user-parent-09', '2026-09-11T19:30:00.000Z', 'parent', 1, '2026-09-11T19:30:00.000Z', '2026-09-11T19:30:00.000Z'),
   ('chk-2026-09-11-quran-child-05', 'sch-sd-islam-01', 'child-05', 'quran', '2026-09-11', 'not_reported', 'user-parent-05', '2026-09-11T19:30:00.000Z', 'parent', 1, '2026-09-11T19:30:00.000Z', '2026-09-11T19:30:00.000Z'),
   ('chk-2026-09-11-dua-child-05', 'sch-sd-islam-01', 'child-05', 'dua', '2026-09-11', 'not_completed', 'user-parent-05', '2026-09-11T19:30:00.000Z', 'parent', 1, '2026-09-11T19:30:00.000Z', '2026-09-11T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -16650,7 +16819,7 @@ VALUES
   ('chk-2026-09-11-maghrib-child-48', 'sch-sd-islam-01', 'child-48', 'maghrib', '2026-09-11', 'completed', 'user-parent-48', '2026-09-11T19:30:00.000Z', 'parent', 1, '2026-09-11T19:30:00.000Z', '2026-09-11T19:30:00.000Z'),
   ('chk-2026-09-11-asr-child-39', 'sch-sd-islam-01', 'child-39', 'asr', '2026-09-11', 'completed', 'user-parent-39', '2026-09-11T19:30:00.000Z', 'parent', 1, '2026-09-11T19:30:00.000Z', '2026-09-11T19:30:00.000Z'),
   ('chk-2026-09-11-maghrib-child-34', 'sch-sd-islam-01', 'child-34', 'maghrib', '2026-09-11', 'completed', 'user-parent-34', '2026-09-11T19:30:00.000Z', 'parent', 1, '2026-09-11T19:30:00.000Z', '2026-09-11T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -16754,7 +16923,7 @@ VALUES
   ('chk-2026-09-11-dua-child-42', 'sch-sd-islam-01', 'child-42', 'dua', '2026-09-11', 'not_completed', 'user-parent-42', '2026-09-11T19:30:00.000Z', 'parent', 1, '2026-09-11T19:30:00.000Z', '2026-09-11T19:30:00.000Z'),
   ('chk-2026-09-11-isha-child-49', 'sch-sd-islam-01', 'child-49', 'isha', '2026-09-11', 'not_completed', 'user-parent-49', '2026-09-11T19:30:00.000Z', 'parent', 1, '2026-09-11T19:30:00.000Z', '2026-09-11T19:30:00.000Z'),
   ('chk-2026-09-11-dua-child-41', 'sch-sd-islam-01', 'child-41', 'dua', '2026-09-11', 'not_completed', 'user-parent-41', '2026-09-11T19:30:00.000Z', 'parent', 1, '2026-09-11T19:30:00.000Z', '2026-09-11T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -16858,7 +17027,7 @@ VALUES
   ('chk-2026-09-12-fajr-child-25', 'sch-sd-islam-01', 'child-25', 'fajr', '2026-09-12', 'completed', 'user-parent-25', '2026-09-12T19:30:00.000Z', 'parent', 1, '2026-09-12T19:30:00.000Z', '2026-09-12T19:30:00.000Z'),
   ('chk-2026-09-12-maghrib-child-13', 'sch-sd-islam-01', 'child-13', 'maghrib', '2026-09-12', 'completed', 'user-parent-13', '2026-09-12T19:30:00.000Z', 'parent', 1, '2026-09-12T19:30:00.000Z', '2026-09-12T19:30:00.000Z'),
   ('chk-2026-09-12-fajr-child-02', 'sch-sd-islam-01', 'child-02', 'fajr', '2026-09-12', 'completed', 'user-parent-02', '2026-09-12T19:30:00.000Z', 'parent', 1, '2026-09-12T19:30:00.000Z', '2026-09-12T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -16962,7 +17131,7 @@ VALUES
   ('chk-2026-09-12-quran-child-18', 'sch-sd-islam-01', 'child-18', 'quran', '2026-09-12', 'not_completed', 'user-parent-18', '2026-09-12T19:30:00.000Z', 'parent', 1, '2026-09-12T19:30:00.000Z', '2026-09-12T19:30:00.000Z'),
   ('chk-2026-09-12-quran-child-05', 'sch-sd-islam-01', 'child-05', 'quran', '2026-09-12', 'not_completed', 'user-parent-05', '2026-09-12T19:30:00.000Z', 'parent', 1, '2026-09-12T19:30:00.000Z', '2026-09-12T19:30:00.000Z'),
   ('chk-2026-09-12-dua-child-05', 'sch-sd-islam-01', 'child-05', 'dua', '2026-09-12', 'not_completed', 'user-parent-05', '2026-09-12T19:30:00.000Z', 'parent', 1, '2026-09-12T19:30:00.000Z', '2026-09-12T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -17066,7 +17235,7 @@ VALUES
   ('chk-2026-09-12-isha-child-50', 'sch-sd-islam-01', 'child-50', 'isha', '2026-09-12', 'completed', 'user-parent-50', '2026-09-12T19:30:00.000Z', 'parent', 1, '2026-09-12T19:30:00.000Z', '2026-09-12T19:30:00.000Z'),
   ('chk-2026-09-12-asr-child-33', 'sch-sd-islam-01', 'child-33', 'asr', '2026-09-12', 'completed', 'user-parent-33', '2026-09-12T19:30:00.000Z', 'parent', 1, '2026-09-12T19:30:00.000Z', '2026-09-12T19:30:00.000Z'),
   ('chk-2026-09-12-dhuhr-child-29', 'sch-sd-islam-01', 'child-29', 'dhuhr', '2026-09-12', 'completed', 'user-parent-29', '2026-09-12T19:30:00.000Z', 'parent', 1, '2026-09-12T19:30:00.000Z', '2026-09-12T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -17170,7 +17339,7 @@ VALUES
   ('chk-2026-09-12-kindness-child-36', 'sch-sd-islam-01', 'child-36', 'kindness', '2026-09-12', 'not_reported', 'user-parent-36', '2026-09-12T19:30:00.000Z', 'parent', 1, '2026-09-12T19:30:00.000Z', '2026-09-12T19:30:00.000Z'),
   ('chk-2026-09-12-quran-child-27', 'sch-sd-islam-01', 'child-27', 'quran', '2026-09-12', 'not_completed', 'user-parent-27', '2026-09-12T19:30:00.000Z', 'parent', 1, '2026-09-12T19:30:00.000Z', '2026-09-12T19:30:00.000Z'),
   ('chk-2026-09-12-dua-child-36', 'sch-sd-islam-01', 'child-36', 'dua', '2026-09-12', 'not_completed', 'user-parent-36', '2026-09-12T19:30:00.000Z', 'parent', 1, '2026-09-12T19:30:00.000Z', '2026-09-12T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -17274,7 +17443,7 @@ VALUES
   ('chk-2026-09-13-quran-child-04', 'sch-sd-islam-01', 'child-04', 'quran', '2026-09-13', 'completed', 'user-parent-04', '2026-09-13T19:30:00.000Z', 'parent', 1, '2026-09-13T19:30:00.000Z', '2026-09-13T19:30:00.000Z'),
   ('chk-2026-09-13-kindness-child-13', 'sch-sd-islam-01', 'child-13', 'kindness', '2026-09-13', 'completed', 'user-parent-13', '2026-09-13T19:30:00.000Z', 'parent', 1, '2026-09-13T19:30:00.000Z', '2026-09-13T19:30:00.000Z'),
   ('chk-2026-09-13-maghrib-child-22', 'sch-sd-islam-01', 'child-22', 'maghrib', '2026-09-13', 'completed', 'user-parent-22', '2026-09-13T19:30:00.000Z', 'parent', 1, '2026-09-13T19:30:00.000Z', '2026-09-13T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -17378,7 +17547,7 @@ VALUES
   ('chk-2026-09-13-dua-child-02', 'sch-sd-islam-01', 'child-02', 'dua', '2026-09-13', 'not_reported', 'user-parent-02', '2026-09-13T19:30:00.000Z', 'parent', 1, '2026-09-13T19:30:00.000Z', '2026-09-13T19:30:00.000Z'),
   ('chk-2026-09-13-quran-child-16', 'sch-sd-islam-01', 'child-16', 'quran', '2026-09-13', 'not_completed', 'user-parent-16', '2026-09-13T19:30:00.000Z', 'parent', 1, '2026-09-13T19:30:00.000Z', '2026-09-13T19:30:00.000Z'),
   ('chk-2026-09-13-dua-child-06', 'sch-sd-islam-01', 'child-06', 'dua', '2026-09-13', 'not_completed', 'user-parent-06', '2026-09-13T19:30:00.000Z', 'parent', 1, '2026-09-13T19:30:00.000Z', '2026-09-13T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -17482,7 +17651,7 @@ VALUES
   ('chk-2026-09-13-dua-child-50', 'sch-sd-islam-01', 'child-50', 'dua', '2026-09-13', 'completed', 'user-parent-50', '2026-09-13T19:30:00.000Z', 'parent', 1, '2026-09-13T19:30:00.000Z', '2026-09-13T19:30:00.000Z'),
   ('chk-2026-09-13-dhuhr-child-39', 'sch-sd-islam-01', 'child-39', 'dhuhr', '2026-09-13', 'completed', 'user-parent-39', '2026-09-13T19:30:00.000Z', 'parent', 1, '2026-09-13T19:30:00.000Z', '2026-09-13T19:30:00.000Z'),
   ('chk-2026-09-13-fajr-child-47', 'sch-sd-islam-01', 'child-47', 'fajr', '2026-09-13', 'completed', 'user-parent-47', '2026-09-13T19:30:00.000Z', 'parent', 1, '2026-09-13T19:30:00.000Z', '2026-09-13T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -17586,7 +17755,7 @@ VALUES
   ('chk-2026-09-13-kindness-child-50', 'sch-sd-islam-01', 'child-50', 'kindness', '2026-09-13', 'not_completed', 'user-parent-50', '2026-09-13T19:30:00.000Z', 'parent', 1, '2026-09-13T19:30:00.000Z', '2026-09-13T19:30:00.000Z'),
   ('chk-2026-09-13-kindness-child-45', 'sch-sd-islam-01', 'child-45', 'kindness', '2026-09-13', 'not_completed', 'user-parent-45', '2026-09-13T19:30:00.000Z', 'parent', 1, '2026-09-13T19:30:00.000Z', '2026-09-13T19:30:00.000Z'),
   ('chk-2026-09-13-dua-child-27', 'sch-sd-islam-01', 'child-27', 'dua', '2026-09-13', 'not_completed', 'user-parent-27', '2026-09-13T19:30:00.000Z', 'parent', 1, '2026-09-13T19:30:00.000Z', '2026-09-13T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -17690,7 +17859,7 @@ VALUES
   ('chk-2026-09-14-kindness-child-14', 'sch-sd-islam-01', 'child-14', 'kindness', '2026-09-14', 'completed', 'user-parent-14', '2026-09-14T19:30:00.000Z', 'parent', 1, '2026-09-14T19:30:00.000Z', '2026-09-14T19:30:00.000Z'),
   ('chk-2026-09-14-maghrib-child-13', 'sch-sd-islam-01', 'child-13', 'maghrib', '2026-09-14', 'completed', 'user-parent-13', '2026-09-14T19:30:00.000Z', 'parent', 1, '2026-09-14T19:30:00.000Z', '2026-09-14T19:30:00.000Z'),
   ('chk-2026-09-14-dua-child-08', 'sch-sd-islam-01', 'child-08', 'dua', '2026-09-14', 'completed', 'user-parent-08', '2026-09-14T19:30:00.000Z', 'parent', 1, '2026-09-14T19:30:00.000Z', '2026-09-14T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -17794,7 +17963,7 @@ VALUES
   ('chk-2026-09-14-dua-child-03', 'sch-sd-islam-01', 'child-03', 'dua', '2026-09-14', 'not_reported', 'user-parent-03', '2026-09-14T19:30:00.000Z', 'parent', 1, '2026-09-14T19:30:00.000Z', '2026-09-14T19:30:00.000Z'),
   ('chk-2026-09-14-dua-child-04', 'sch-sd-islam-01', 'child-04', 'dua', '2026-09-14', 'not_reported', 'user-parent-04', '2026-09-14T19:30:00.000Z', 'parent', 1, '2026-09-14T19:30:00.000Z', '2026-09-14T19:30:00.000Z'),
   ('chk-2026-09-14-kindness-child-13', 'sch-sd-islam-01', 'child-13', 'kindness', '2026-09-14', 'not_completed', 'user-parent-13', '2026-09-14T19:30:00.000Z', 'parent', 1, '2026-09-14T19:30:00.000Z', '2026-09-14T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -17898,7 +18067,7 @@ VALUES
   ('chk-2026-09-14-asr-child-50', 'sch-sd-islam-01', 'child-50', 'asr', '2026-09-14', 'completed', 'user-parent-50', '2026-09-14T19:30:00.000Z', 'parent', 1, '2026-09-14T19:30:00.000Z', '2026-09-14T19:30:00.000Z'),
   ('chk-2026-09-14-kindness-child-29', 'sch-sd-islam-01', 'child-29', 'kindness', '2026-09-14', 'completed', 'user-parent-29', '2026-09-14T19:30:00.000Z', 'parent', 1, '2026-09-14T19:30:00.000Z', '2026-09-14T19:30:00.000Z'),
   ('chk-2026-09-14-asr-child-46', 'sch-sd-islam-01', 'child-46', 'asr', '2026-09-14', 'completed', 'user-parent-46', '2026-09-14T19:30:00.000Z', 'parent', 1, '2026-09-14T19:30:00.000Z', '2026-09-14T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -18002,7 +18171,7 @@ VALUES
   ('chk-2026-09-14-dua-child-30', 'sch-sd-islam-01', 'child-30', 'dua', '2026-09-14', 'not_completed', 'user-parent-30', '2026-09-14T19:30:00.000Z', 'parent', 1, '2026-09-14T19:30:00.000Z', '2026-09-14T19:30:00.000Z'),
   ('chk-2026-09-14-quran-child-44', 'sch-sd-islam-01', 'child-44', 'quran', '2026-09-14', 'not_completed', 'user-parent-44', '2026-09-14T19:30:00.000Z', 'parent', 1, '2026-09-14T19:30:00.000Z', '2026-09-14T19:30:00.000Z'),
   ('chk-2026-09-14-dua-child-37', 'sch-sd-islam-01', 'child-37', 'dua', '2026-09-14', 'not_completed', 'user-parent-37', '2026-09-14T19:30:00.000Z', 'parent', 1, '2026-09-14T19:30:00.000Z', '2026-09-14T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -18106,7 +18275,7 @@ VALUES
   ('chk-2026-09-15-quran-child-06', 'sch-sd-islam-01', 'child-06', 'quran', '2026-09-15', 'completed', 'user-parent-06', '2026-09-15T19:30:00.000Z', 'parent', 1, '2026-09-15T19:30:00.000Z', '2026-09-15T19:30:00.000Z'),
   ('chk-2026-09-15-maghrib-child-14', 'sch-sd-islam-01', 'child-14', 'maghrib', '2026-09-15', 'completed', 'user-parent-14', '2026-09-15T19:30:00.000Z', 'parent', 1, '2026-09-15T19:30:00.000Z', '2026-09-15T19:30:00.000Z'),
   ('chk-2026-09-15-maghrib-child-19', 'sch-sd-islam-01', 'child-19', 'maghrib', '2026-09-15', 'completed', 'user-parent-19', '2026-09-15T19:30:00.000Z', 'parent', 1, '2026-09-15T19:30:00.000Z', '2026-09-15T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -18210,7 +18379,7 @@ VALUES
   ('chk-2026-09-15-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-09-15', 'not_completed', 'user-parent-13', '2026-09-15T19:30:00.000Z', 'parent', 1, '2026-09-15T19:30:00.000Z', '2026-09-15T19:30:00.000Z'),
   ('chk-2026-09-15-dua-child-18', 'sch-sd-islam-01', 'child-18', 'dua', '2026-09-15', 'not_completed', 'user-parent-18', '2026-09-15T19:30:00.000Z', 'parent', 1, '2026-09-15T19:30:00.000Z', '2026-09-15T19:30:00.000Z'),
   ('chk-2026-09-15-dua-child-05', 'sch-sd-islam-01', 'child-05', 'dua', '2026-09-15', 'not_completed', 'user-parent-05', '2026-09-15T19:30:00.000Z', 'parent', 1, '2026-09-15T19:30:00.000Z', '2026-09-15T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -18314,7 +18483,7 @@ VALUES
   ('chk-2026-09-15-isha-child-50', 'sch-sd-islam-01', 'child-50', 'isha', '2026-09-15', 'completed', 'user-parent-50', '2026-09-15T19:30:00.000Z', 'parent', 1, '2026-09-15T19:30:00.000Z', '2026-09-15T19:30:00.000Z'),
   ('chk-2026-09-15-fajr-child-26', 'sch-sd-islam-01', 'child-26', 'fajr', '2026-09-15', 'completed', 'user-parent-26', '2026-09-15T19:30:00.000Z', 'parent', 1, '2026-09-15T19:30:00.000Z', '2026-09-15T19:30:00.000Z'),
   ('chk-2026-09-15-kindness-child-26', 'sch-sd-islam-01', 'child-26', 'kindness', '2026-09-15', 'completed', 'user-parent-26', '2026-09-15T19:30:00.000Z', 'parent', 1, '2026-09-15T19:30:00.000Z', '2026-09-15T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -18418,7 +18587,7 @@ VALUES
   ('chk-2026-09-15-dua-child-46', 'sch-sd-islam-01', 'child-46', 'dua', '2026-09-15', 'not_completed', 'user-parent-46', '2026-09-15T19:30:00.000Z', 'parent', 1, '2026-09-15T19:30:00.000Z', '2026-09-15T19:30:00.000Z'),
   ('chk-2026-09-15-kindness-child-27', 'sch-sd-islam-01', 'child-27', 'kindness', '2026-09-15', 'not_completed', 'user-parent-27', '2026-09-15T19:30:00.000Z', 'parent', 1, '2026-09-15T19:30:00.000Z', '2026-09-15T19:30:00.000Z'),
   ('chk-2026-09-15-dua-child-27', 'sch-sd-islam-01', 'child-27', 'dua', '2026-09-15', 'not_completed', 'user-parent-27', '2026-09-15T19:30:00.000Z', 'parent', 1, '2026-09-15T19:30:00.000Z', '2026-09-15T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -18522,7 +18691,7 @@ VALUES
   ('chk-2026-09-16-dhuhr-child-03', 'sch-sd-islam-01', 'child-03', 'dhuhr', '2026-09-16', 'completed', 'user-parent-03', '2026-09-16T19:30:00.000Z', 'parent', 1, '2026-09-16T19:30:00.000Z', '2026-09-16T19:30:00.000Z'),
   ('chk-2026-09-16-dua-child-08', 'sch-sd-islam-01', 'child-08', 'dua', '2026-09-16', 'completed', 'user-parent-08', '2026-09-16T19:30:00.000Z', 'parent', 1, '2026-09-16T19:30:00.000Z', '2026-09-16T19:30:00.000Z'),
   ('chk-2026-09-16-dua-child-21', 'sch-sd-islam-01', 'child-21', 'dua', '2026-09-16', 'completed', 'user-parent-21', '2026-09-16T19:30:00.000Z', 'parent', 1, '2026-09-16T19:30:00.000Z', '2026-09-16T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -18626,7 +18795,7 @@ VALUES
   ('chk-2026-09-16-dua-child-22', 'sch-sd-islam-01', 'child-22', 'dua', '2026-09-16', 'not_completed', 'user-parent-22', '2026-09-16T19:30:00.000Z', 'parent', 1, '2026-09-16T19:30:00.000Z', '2026-09-16T19:30:00.000Z'),
   ('chk-2026-09-16-kindness-child-05', 'sch-sd-islam-01', 'child-05', 'kindness', '2026-09-16', 'not_completed', 'user-parent-05', '2026-09-16T19:30:00.000Z', 'parent', 1, '2026-09-16T19:30:00.000Z', '2026-09-16T19:30:00.000Z'),
   ('chk-2026-09-16-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-09-16', 'not_completed', 'user-parent-13', '2026-09-16T19:30:00.000Z', 'parent', 1, '2026-09-16T19:30:00.000Z', '2026-09-16T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -18730,7 +18899,7 @@ VALUES
   ('chk-2026-09-16-kindness-child-31', 'sch-sd-islam-01', 'child-31', 'kindness', '2026-09-16', 'completed', 'user-parent-31', '2026-09-16T19:30:00.000Z', 'parent', 1, '2026-09-16T19:30:00.000Z', '2026-09-16T19:30:00.000Z'),
   ('chk-2026-09-16-kindness-child-47', 'sch-sd-islam-01', 'child-47', 'kindness', '2026-09-16', 'completed', 'user-parent-47', '2026-09-16T19:30:00.000Z', 'parent', 1, '2026-09-16T19:30:00.000Z', '2026-09-16T19:30:00.000Z'),
   ('chk-2026-09-16-maghrib-child-43', 'sch-sd-islam-01', 'child-43', 'maghrib', '2026-09-16', 'completed', 'user-parent-43', '2026-09-16T19:30:00.000Z', 'parent', 1, '2026-09-16T19:30:00.000Z', '2026-09-16T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -18834,7 +19003,7 @@ VALUES
   ('chk-2026-09-16-dua-child-46', 'sch-sd-islam-01', 'child-46', 'dua', '2026-09-16', 'not_reported', 'user-parent-46', '2026-09-16T19:30:00.000Z', 'parent', 1, '2026-09-16T19:30:00.000Z', '2026-09-16T19:30:00.000Z'),
   ('chk-2026-09-16-dua-child-30', 'sch-sd-islam-01', 'child-30', 'dua', '2026-09-16', 'not_reported', 'user-parent-30', '2026-09-16T19:30:00.000Z', 'parent', 1, '2026-09-16T19:30:00.000Z', '2026-09-16T19:30:00.000Z'),
   ('chk-2026-09-16-dua-child-45', 'sch-sd-islam-01', 'child-45', 'dua', '2026-09-16', 'not_completed', 'user-parent-45', '2026-09-16T19:30:00.000Z', 'parent', 1, '2026-09-16T19:30:00.000Z', '2026-09-16T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -18938,7 +19107,7 @@ VALUES
   ('chk-2026-09-17-dhuhr-child-12', 'sch-sd-islam-01', 'child-12', 'dhuhr', '2026-09-17', 'completed', 'user-parent-12', '2026-09-17T19:30:00.000Z', 'parent', 1, '2026-09-17T19:30:00.000Z', '2026-09-17T19:30:00.000Z'),
   ('chk-2026-09-17-dhuhr-child-22', 'sch-sd-islam-01', 'child-22', 'dhuhr', '2026-09-17', 'completed', 'user-parent-22', '2026-09-17T19:30:00.000Z', 'parent', 1, '2026-09-17T19:30:00.000Z', '2026-09-17T19:30:00.000Z'),
   ('chk-2026-09-17-dhuhr-child-03', 'sch-sd-islam-01', 'child-03', 'dhuhr', '2026-09-17', 'completed', 'user-parent-03', '2026-09-17T19:30:00.000Z', 'parent', 1, '2026-09-17T19:30:00.000Z', '2026-09-17T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -19042,7 +19211,7 @@ VALUES
   ('chk-2026-09-17-dua-child-22', 'sch-sd-islam-01', 'child-22', 'dua', '2026-09-17', 'not_reported', 'user-parent-22', '2026-09-17T19:30:00.000Z', 'parent', 1, '2026-09-17T19:30:00.000Z', '2026-09-17T19:30:00.000Z'),
   ('chk-2026-09-17-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-09-17', 'not_completed', 'user-parent-13', '2026-09-17T19:30:00.000Z', 'parent', 1, '2026-09-17T19:30:00.000Z', '2026-09-17T19:30:00.000Z'),
   ('chk-2026-09-17-dua-child-25', 'sch-sd-islam-01', 'child-25', 'dua', '2026-09-17', 'not_completed', 'user-parent-25', '2026-09-17T19:30:00.000Z', 'parent', 1, '2026-09-17T19:30:00.000Z', '2026-09-17T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -19146,7 +19315,7 @@ VALUES
   ('chk-2026-09-17-quran-child-29', 'sch-sd-islam-01', 'child-29', 'quran', '2026-09-17', 'completed', 'user-parent-29', '2026-09-17T19:30:00.000Z', 'parent', 1, '2026-09-17T19:30:00.000Z', '2026-09-17T19:30:00.000Z'),
   ('chk-2026-09-17-kindness-child-47', 'sch-sd-islam-01', 'child-47', 'kindness', '2026-09-17', 'completed', 'user-parent-47', '2026-09-17T19:30:00.000Z', 'parent', 1, '2026-09-17T19:30:00.000Z', '2026-09-17T19:30:00.000Z'),
   ('chk-2026-09-17-dua-child-28', 'sch-sd-islam-01', 'child-28', 'dua', '2026-09-17', 'completed', 'user-parent-28', '2026-09-17T19:30:00.000Z', 'parent', 1, '2026-09-17T19:30:00.000Z', '2026-09-17T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -19250,7 +19419,7 @@ VALUES
   ('chk-2026-09-17-dua-child-29', 'sch-sd-islam-01', 'child-29', 'dua', '2026-09-17', 'not_completed', 'user-parent-29', '2026-09-17T19:30:00.000Z', 'parent', 1, '2026-09-17T19:30:00.000Z', '2026-09-17T19:30:00.000Z'),
   ('chk-2026-09-17-dua-child-43', 'sch-sd-islam-01', 'child-43', 'dua', '2026-09-17', 'not_completed', 'user-parent-43', '2026-09-17T19:30:00.000Z', 'parent', 1, '2026-09-17T19:30:00.000Z', '2026-09-17T19:30:00.000Z'),
   ('chk-2026-09-17-dua-child-50', 'sch-sd-islam-01', 'child-50', 'dua', '2026-09-17', 'not_completed', 'user-parent-50', '2026-09-17T19:30:00.000Z', 'parent', 1, '2026-09-17T19:30:00.000Z', '2026-09-17T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -19354,7 +19523,7 @@ VALUES
   ('chk-2026-09-18-kindness-child-25', 'sch-sd-islam-01', 'child-25', 'kindness', '2026-09-18', 'completed', 'user-parent-25', '2026-09-18T19:30:00.000Z', 'parent', 1, '2026-09-18T19:30:00.000Z', '2026-09-18T19:30:00.000Z'),
   ('chk-2026-09-18-asr-child-05', 'sch-sd-islam-01', 'child-05', 'asr', '2026-09-18', 'completed', 'user-parent-05', '2026-09-18T19:30:00.000Z', 'parent', 1, '2026-09-18T19:30:00.000Z', '2026-09-18T19:30:00.000Z'),
   ('chk-2026-09-18-asr-child-08', 'sch-sd-islam-01', 'child-08', 'asr', '2026-09-18', 'completed', 'user-parent-08', '2026-09-18T19:30:00.000Z', 'parent', 1, '2026-09-18T19:30:00.000Z', '2026-09-18T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -19458,7 +19627,7 @@ VALUES
   ('chk-2026-09-18-quran-child-13', 'sch-sd-islam-01', 'child-13', 'quran', '2026-09-18', 'not_completed', 'user-parent-13', '2026-09-18T19:30:00.000Z', 'parent', 1, '2026-09-18T19:30:00.000Z', '2026-09-18T19:30:00.000Z'),
   ('chk-2026-09-18-quran-child-05', 'sch-sd-islam-01', 'child-05', 'quran', '2026-09-18', 'not_completed', 'user-parent-05', '2026-09-18T19:30:00.000Z', 'parent', 1, '2026-09-18T19:30:00.000Z', '2026-09-18T19:30:00.000Z'),
   ('chk-2026-09-18-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-09-18', 'not_completed', 'user-parent-13', '2026-09-18T19:30:00.000Z', 'parent', 1, '2026-09-18T19:30:00.000Z', '2026-09-18T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -19562,7 +19731,7 @@ VALUES
   ('chk-2026-09-18-maghrib-child-50', 'sch-sd-islam-01', 'child-50', 'maghrib', '2026-09-18', 'completed', 'user-parent-50', '2026-09-18T19:30:00.000Z', 'parent', 1, '2026-09-18T19:30:00.000Z', '2026-09-18T19:30:00.000Z'),
   ('chk-2026-09-18-maghrib-child-37', 'sch-sd-islam-01', 'child-37', 'maghrib', '2026-09-18', 'completed', 'user-parent-37', '2026-09-18T19:30:00.000Z', 'parent', 1, '2026-09-18T19:30:00.000Z', '2026-09-18T19:30:00.000Z'),
   ('chk-2026-09-18-dua-child-36', 'sch-sd-islam-01', 'child-36', 'dua', '2026-09-18', 'completed', 'user-parent-36', '2026-09-18T19:30:00.000Z', 'parent', 1, '2026-09-18T19:30:00.000Z', '2026-09-18T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -19666,7 +19835,7 @@ VALUES
   ('chk-2026-09-18-kindness-child-50', 'sch-sd-islam-01', 'child-50', 'kindness', '2026-09-18', 'not_completed', 'user-parent-50', '2026-09-18T19:30:00.000Z', 'parent', 1, '2026-09-18T19:30:00.000Z', '2026-09-18T19:30:00.000Z'),
   ('chk-2026-09-18-kindness-child-41', 'sch-sd-islam-01', 'child-41', 'kindness', '2026-09-18', 'not_completed', 'user-parent-41', '2026-09-18T19:30:00.000Z', 'parent', 1, '2026-09-18T19:30:00.000Z', '2026-09-18T19:30:00.000Z'),
   ('chk-2026-09-18-kindness-child-44', 'sch-sd-islam-01', 'child-44', 'kindness', '2026-09-18', 'not_completed', 'user-parent-44', '2026-09-18T19:30:00.000Z', 'parent', 1, '2026-09-18T19:30:00.000Z', '2026-09-18T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -19770,7 +19939,7 @@ VALUES
   ('chk-2026-09-19-quran-child-20', 'sch-sd-islam-01', 'child-20', 'quran', '2026-09-19', 'completed', 'user-parent-20', '2026-09-19T19:30:00.000Z', 'parent', 1, '2026-09-19T19:30:00.000Z', '2026-09-19T19:30:00.000Z'),
   ('chk-2026-09-19-quran-child-15', 'sch-sd-islam-01', 'child-15', 'quran', '2026-09-19', 'completed', 'user-parent-15', '2026-09-19T19:30:00.000Z', 'parent', 1, '2026-09-19T19:30:00.000Z', '2026-09-19T19:30:00.000Z'),
   ('chk-2026-09-19-kindness-child-15', 'sch-sd-islam-01', 'child-15', 'kindness', '2026-09-19', 'completed', 'user-parent-15', '2026-09-19T19:30:00.000Z', 'parent', 1, '2026-09-19T19:30:00.000Z', '2026-09-19T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -19874,7 +20043,7 @@ VALUES
   ('chk-2026-09-19-quran-child-18', 'sch-sd-islam-01', 'child-18', 'quran', '2026-09-19', 'not_completed', 'user-parent-18', '2026-09-19T19:30:00.000Z', 'parent', 1, '2026-09-19T19:30:00.000Z', '2026-09-19T19:30:00.000Z'),
   ('chk-2026-09-19-kindness-child-24', 'sch-sd-islam-01', 'child-24', 'kindness', '2026-09-19', 'not_completed', 'user-parent-24', '2026-09-19T19:30:00.000Z', 'parent', 1, '2026-09-19T19:30:00.000Z', '2026-09-19T19:30:00.000Z'),
   ('chk-2026-09-19-dua-child-13', 'sch-sd-islam-01', 'child-13', 'dua', '2026-09-19', 'not_completed', 'user-parent-13', '2026-09-19T19:30:00.000Z', 'parent', 1, '2026-09-19T19:30:00.000Z', '2026-09-19T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -19978,7 +20147,7 @@ VALUES
   ('chk-2026-09-19-dua-child-47', 'sch-sd-islam-01', 'child-47', 'dua', '2026-09-19', 'completed', 'user-parent-47', '2026-09-19T19:30:00.000Z', 'parent', 1, '2026-09-19T19:30:00.000Z', '2026-09-19T19:30:00.000Z'),
   ('chk-2026-09-19-asr-child-40', 'sch-sd-islam-01', 'child-40', 'asr', '2026-09-19', 'completed', 'user-parent-40', '2026-09-19T19:30:00.000Z', 'parent', 1, '2026-09-19T19:30:00.000Z', '2026-09-19T19:30:00.000Z'),
   ('chk-2026-09-19-kindness-child-43', 'sch-sd-islam-01', 'child-43', 'kindness', '2026-09-19', 'completed', 'user-parent-43', '2026-09-19T19:30:00.000Z', 'parent', 1, '2026-09-19T19:30:00.000Z', '2026-09-19T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -20082,7 +20251,7 @@ VALUES
   ('chk-2026-09-19-dua-child-29', 'sch-sd-islam-01', 'child-29', 'dua', '2026-09-19', 'not_reported', 'user-parent-29', '2026-09-19T19:30:00.000Z', 'parent', 1, '2026-09-19T19:30:00.000Z', '2026-09-19T19:30:00.000Z'),
   ('chk-2026-09-19-dua-child-43', 'sch-sd-islam-01', 'child-43', 'dua', '2026-09-19', 'not_completed', 'user-parent-43', '2026-09-19T19:30:00.000Z', 'parent', 1, '2026-09-19T19:30:00.000Z', '2026-09-19T19:30:00.000Z'),
   ('chk-2026-09-19-dua-child-37', 'sch-sd-islam-01', 'child-37', 'dua', '2026-09-19', 'not_completed', 'user-parent-37', '2026-09-19T19:30:00.000Z', 'parent', 1, '2026-09-19T19:30:00.000Z', '2026-09-19T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -20186,7 +20355,7 @@ VALUES
   ('chk-2026-09-20-fajr-child-08', 'sch-sd-islam-01', 'child-08', 'fajr', '2026-09-20', 'completed', 'user-parent-08', '2026-09-20T19:30:00.000Z', 'parent', 1, '2026-09-20T19:30:00.000Z', '2026-09-20T19:30:00.000Z'),
   ('chk-2026-09-20-quran-child-03', 'sch-sd-islam-01', 'child-03', 'quran', '2026-09-20', 'completed', 'user-parent-03', '2026-09-20T19:30:00.000Z', 'parent', 1, '2026-09-20T19:30:00.000Z', '2026-09-20T19:30:00.000Z'),
   ('chk-2026-09-20-asr-child-24', 'sch-sd-islam-01', 'child-24', 'asr', '2026-09-20', 'completed', 'user-parent-24', '2026-09-20T19:30:00.000Z', 'parent', 1, '2026-09-20T19:30:00.000Z', '2026-09-20T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -20290,7 +20459,7 @@ VALUES
   ('chk-2026-09-20-kindness-child-13', 'sch-sd-islam-01', 'child-13', 'kindness', '2026-09-20', 'not_completed', 'user-parent-13', '2026-09-20T19:30:00.000Z', 'parent', 1, '2026-09-20T19:30:00.000Z', '2026-09-20T19:30:00.000Z'),
   ('chk-2026-09-20-kindness-child-05', 'sch-sd-islam-01', 'child-05', 'kindness', '2026-09-20', 'not_completed', 'user-parent-05', '2026-09-20T19:30:00.000Z', 'parent', 1, '2026-09-20T19:30:00.000Z', '2026-09-20T19:30:00.000Z'),
   ('chk-2026-09-20-dua-child-17', 'sch-sd-islam-01', 'child-17', 'dua', '2026-09-20', 'not_completed', 'user-parent-17', '2026-09-20T19:30:00.000Z', 'parent', 1, '2026-09-20T19:30:00.000Z', '2026-09-20T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -20394,7 +20563,7 @@ VALUES
   ('chk-2026-09-20-isha-child-45', 'sch-sd-islam-01', 'child-45', 'isha', '2026-09-20', 'completed', 'user-parent-45', '2026-09-20T19:30:00.000Z', 'parent', 1, '2026-09-20T19:30:00.000Z', '2026-09-20T19:30:00.000Z'),
   ('chk-2026-09-20-quran-child-28', 'sch-sd-islam-01', 'child-28', 'quran', '2026-09-20', 'completed', 'user-parent-28', '2026-09-20T19:30:00.000Z', 'parent', 1, '2026-09-20T19:30:00.000Z', '2026-09-20T19:30:00.000Z'),
   ('chk-2026-09-20-maghrib-child-30', 'sch-sd-islam-01', 'child-30', 'maghrib', '2026-09-20', 'completed', 'user-parent-30', '2026-09-20T19:30:00.000Z', 'parent', 1, '2026-09-20T19:30:00.000Z', '2026-09-20T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO checklist_entries (id, school_id, child_id, habit_item_id, entry_date, status, reported_by, reported_at, source, version, created_at, updated_at)
 VALUES
@@ -20498,9 +20667,9 @@ VALUES
   ('chk-2026-09-20-isha-child-28', 'sch-sd-islam-01', 'child-28', 'isha', '2026-09-20', 'not_completed', 'user-parent-28', '2026-09-20T19:30:00.000Z', 'parent', 1, '2026-09-20T19:30:00.000Z', '2026-09-20T19:30:00.000Z'),
   ('chk-2026-09-20-kindness-child-37', 'sch-sd-islam-01', 'child-37', 'kindness', '2026-09-20', 'not_completed', 'user-parent-37', '2026-09-20T19:30:00.000Z', 'parent', 1, '2026-09-20T19:30:00.000Z', '2026-09-20T19:30:00.000Z'),
   ('chk-2026-09-20-kindness-child-26', 'sch-sd-islam-01', 'child-26', 'kindness', '2026-09-20', 'not_reported', 'user-parent-26', '2026-09-20T19:30:00.000Z', 'parent', 1, '2026-09-20T19:30:00.000Z', '2026-09-20T19:30:00.000Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
--- DATA TABEL: points_ledger (51 records)
+-- DATA: points_ledger (51 rows)
 INSERT INTO points_ledger (id, school_id, child_id, points, reason, source_type, created_at)
 VALUES
   ('pt-child-01', 'sch-sd-islam-01', 'child-01', 3290, 'Checklist Ibadah Harian', 'checklist', '2026-09-17T12:30:26.098Z'),
@@ -20554,9 +20723,9 @@ VALUES
   ('pt-child-49', 'sch-sd-islam-01', 'child-49', 2430, 'Checklist Ibadah Harian', 'checklist', '2026-09-17T12:30:26.098Z'),
   ('pt-child-50', 'sch-sd-islam-01', 'child-50', 2260, 'Checklist Ibadah Harian', 'checklist', '2026-09-17T12:30:26.098Z'),
   ('pt-7c5f0321', 'sch-sd-islam-01', 'child-01', 5, 'Menyelesaikan checklist ibadah', 'checklist', '2026-09-17T12:52:35.911Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
--- DATA TABEL: streak_snapshots (50 records)
+-- DATA: streak_snapshots (50 rows)
 INSERT INTO streak_snapshots (id, child_id, current_streak, longest_streak, last_calculated_date, updated_at)
 VALUES
   ('strk-child-01', 'child-01', 31, 31, '2026-09-17', '2026-09-17T12:52:35.952Z'),
@@ -20609,9 +20778,9 @@ VALUES
   ('strk-child-48', 'child-48', 18, 24, '2026-09-17', '2026-09-17T12:30:26.098Z'),
   ('strk-child-49', 'child-49', 16, 22, '2026-09-17', '2026-09-17T12:30:26.098Z'),
   ('strk-child-50', 'child-50', 15, 21, '2026-09-17', '2026-09-17T12:30:26.098Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
--- DATA TABEL: checklist_notes (8 records)
+-- DATA: checklist_notes (8 rows)
 INSERT INTO checklist_notes (id, school_id, child_id, entry_date, note, author_id, author_role, created_at, updated_at)
 VALUES
   ('note-seed-1', 'sch-sd-islam-01', 'child-01', '2026-09-17', 'Alhamdulillah ananda Ghani shalat Subuh tepat waktu berjamaah di masjid bersama Ayah.', 'user-parent-01', 'parent', '2026-09-17T12:30:26.098Z', '2026-09-17T12:30:26.098Z'),
@@ -20622,5 +20791,5 @@ VALUES
   ('note-seed-6', 'sch-sd-islam-01', 'child-34', '2026-09-16', 'Alisya sangat bersemangat membaca hafalan surah pendek sebelum tidur.', 'user-parent-34', 'parent', '2026-09-17T12:30:26.098Z', '2026-09-17T12:30:26.098Z'),
   ('note-seed-7', 'sch-sd-islam-01', 'child-01', '2026-09-17', 'Masya Allah, hebat sekali ananda Ghani! Pertahankan shalat berjamaahnya ya nak.', 'user-teacher-andi', 'teacher', '2026-09-17T12:30:26.098Z', '2026-09-17T12:30:26.098Z'),
   ('note-seed-8', 'sch-sd-islam-01', 'child-34', '2026-09-16', 'Barakallahu fiik ananda Alisya, hafalan surahnya semakin lancar dan fasih.', 'user-teacher-andi', 'teacher', '2026-09-17T12:30:26.098Z', '2026-09-17T12:30:26.098Z')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 

@@ -7,211 +7,39 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const dbPath = path.resolve(__dirname, "..", "data", "sahabat_ibadah.db");
+const schemaSqlPath = path.resolve(__dirname, "schema.sql");
 const outSqlPath = path.resolve(__dirname, "supabase_seed_50_students.sql");
+const partsDir = path.resolve(__dirname, "supabase_parts");
 
 if (!fs.existsSync(dbPath)) {
   console.error("Database SQLite tidak ditemukan di:", dbPath);
   process.exit(1);
 }
 
+if (!fs.existsSync(partsDir)) {
+  fs.mkdirSync(partsDir, { recursive: true });
+}
+
 const db = new DatabaseSync(dbPath);
 
 console.log("Mengekspor data dari SQLite ke PostgreSQL Supabase...");
 
-let sql = `-- =============================================================================\n`;
-sql += `-- SAHABAT IBADAH — SKRIP SEED SUPABASE POSTGRESQL\n`;
-sql += `-- Berisi 50 Siswa (Kelas 1A & 2A), 50 Akun Ortu, & Riwayat Ceklis (4 Ags - 17 Sept 2026)\n`;
-sql += `-- Dijalankan di Supabase SQL Editor: Langsung Paste & Klik RUN\n`;
-sql += `-- =============================================================================\n\n`;
+// Baca skema SQL resmi dan bersihkan PRAGMA SQLite
+let rawSchema = fs.readFileSync(schemaSqlPath, "utf-8");
+rawSchema = rawSchema.replace(/PRAGMA\s+foreign_keys\s*=\s*ON;/gi, "");
 
-// 1. DDL Tables for PostgreSQL (Supabase)
-sql += `-- 1. SKEMA TABEL POSTGRESQL\n`;
-sql += `
-CREATE TABLE IF NOT EXISTS schools (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  code TEXT UNIQUE NOT NULL,
-  timezone TEXT NOT NULL DEFAULT 'Asia/Jakarta',
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'archived')),
-  logo_url TEXT,
-  settings_json TEXT DEFAULT '{}',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
+const ddlSchema = `-- =============================================================================
+-- SAHABAT IBADAH — SKEMA TABEL POSTGRESQL (SUPABASE)
+-- =============================================================================
 
-CREATE TABLE IF NOT EXISTS users (
-  id TEXT PRIMARY KEY,
-  email TEXT UNIQUE,
-  phone TEXT,
-  password_hash TEXT NOT NULL,
-  full_name TEXT NOT NULL,
-  avatar_url TEXT,
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('invited', 'active', 'suspended', 'deleted')),
-  last_login_at TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
+-- 1. Bersihkan tabel lama jika ada agar struktur 50 siswa masuk bersih tanpa bentrok kunci unik
+DROP TABLE IF EXISTS checklist_notes, streak_snapshots, points_ledger, child_badges, badges,
+  checklist_entries, parent_child_links, teacher_class_links, student_class_links,
+  children, habit_periods, habit_template_items, habit_templates, classes,
+  email_verifications, user_roles, users, schools, audit_logs CASCADE;
 
-CREATE TABLE IF NOT EXISTS user_roles (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
-  role TEXT NOT NULL CHECK (role IN ('parent', 'teacher', 'admin', 'superadmin')),
-  created_at TEXT NOT NULL,
-  UNIQUE(user_id, school_id, role)
-);
-
-CREATE TABLE IF NOT EXISTS email_verifications (
-  id TEXT PRIMARY KEY,
-  email TEXT NOT NULL,
-  otp_code TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'teacher',
-  full_name TEXT NOT NULL,
-  school_name TEXT NOT NULL,
-  password_hash TEXT NOT NULL,
-  expires_at TEXT NOT NULL,
-  verified_at TEXT,
-  created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS classes (
-  id TEXT PRIMARY KEY,
-  school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
-  teacher_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  grade_level TEXT,
-  academic_year TEXT,
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS children (
-  id TEXT PRIMARY KEY,
-  school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
-  full_name TEXT NOT NULL,
-  preferred_name TEXT,
-  birth_date TEXT,
-  grade_level TEXT,
-  gender TEXT,
-  avatar_url TEXT,
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'archived')),
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS student_class_links (
-  id TEXT PRIMARY KEY,
-  child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
-  class_id TEXT NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'graduated', 'moved')),
-  created_at TEXT NOT NULL,
-  UNIQUE(child_id, class_id)
-);
-
-CREATE TABLE IF NOT EXISTS teacher_class_links (
-  id TEXT PRIMARY KEY,
-  teacher_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  class_id TEXT NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
-  is_homeroom INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL,
-  UNIQUE(teacher_user_id, class_id)
-);
-
-CREATE TABLE IF NOT EXISTS parent_child_links (
-  id TEXT PRIMARY KEY,
-  parent_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
-  relationship TEXT NOT NULL DEFAULT 'parent',
-  is_primary INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL,
-  UNIQUE(parent_user_id, child_id)
-);
-
-CREATE TABLE IF NOT EXISTS habit_templates (
-  id TEXT PRIMARY KEY,
-  school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  description TEXT,
-  is_default INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS habit_template_items (
-  id TEXT PRIMARY KEY,
-  school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
-  template_id TEXT NOT NULL REFERENCES habit_templates(id) ON DELETE CASCADE,
-  category TEXT NOT NULL CHECK (category IN ('ibadah_wajib', 'ibadah_harian', 'kebiasaan_baik')),
-  name TEXT NOT NULL,
-  description TEXT,
-  icon_key TEXT NOT NULL,
-  sort_order INTEGER NOT NULL DEFAULT 1,
-  is_active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS checklist_entries (
-  id TEXT PRIMARY KEY,
-  school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
-  child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
-  habit_id TEXT NOT NULL,
-  entry_date TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('completed', 'not_completed', 'not_reported')),
-  completed_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-  completed_at TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  UNIQUE(child_id, habit_id, entry_date)
-);
-
-CREATE TABLE IF NOT EXISTS checklist_notes (
-  id TEXT PRIMARY KEY,
-  school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
-  child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
-  entry_date TEXT NOT NULL,
-  note TEXT NOT NULL,
-  author_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  author_role TEXT NOT NULL CHECK (author_role IN ('parent', 'teacher')),
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  UNIQUE(child_id, entry_date, author_role)
-);
-
-CREATE TABLE IF NOT EXISTS streak_snapshots (
-  id TEXT PRIMARY KEY,
-  child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
-  current_streak INTEGER NOT NULL DEFAULT 0,
-  longest_streak INTEGER NOT NULL DEFAULT 0,
-  last_activity_date TEXT,
-  updated_at TEXT NOT NULL,
-  UNIQUE(child_id)
-);
-
-CREATE TABLE IF NOT EXISTS points_ledger (
-  id TEXT PRIMARY KEY,
-  school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
-  child_id TEXT NOT NULL REFERENCES children(id) ON DELETE CASCADE,
-  points_change INTEGER NOT NULL,
-  reason TEXT NOT NULL DEFAULT 'Tuntaskan Ibadah Harian',
-  created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS audit_logs (
-  id TEXT PRIMARY KEY,
-  school_id TEXT REFERENCES schools(id) ON DELETE CASCADE,
-  actor_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-  action TEXT NOT NULL,
-  entity_type TEXT NOT NULL,
-  entity_id TEXT,
-  before_data TEXT,
-  after_data TEXT,
-  ip_address TEXT,
-  user_agent TEXT,
-  created_at TEXT NOT NULL
-);
-\n`;
+${rawSchema}
+`;
 
 function escapeSqlVal(val: any): string {
   if (val === null || val === undefined) return "NULL";
@@ -219,46 +47,74 @@ function escapeSqlVal(val: any): string {
   return `'${String(val).replace(/'/g, "''")}'`;
 }
 
-function dumpTable(tableName: string, conflictTarget?: string) {
-  const rows = db.prepare(`SELECT * FROM ${tableName}`).all();
-  if (rows.length === 0) return;
+function dumpTableRows(tableName: string, whereClause = "", conflictTarget = ""): string {
+  const query = whereClause ? `SELECT * FROM ${tableName} WHERE ${whereClause}` : `SELECT * FROM ${tableName}`;
+  const rows = db.prepare(query).all();
+  if (rows.length === 0) return "";
 
-  sql += `-- DATA TABEL: ${tableName} (${rows.length} records)\n`;
+  let res = `-- DATA: ${tableName} (${rows.length} rows)\n`;
   const cols = Object.keys(rows[0]);
-
-  // Insert in batches of 100 to keep statements clean and within Postgres limits
   const batchSize = 100;
+
   for (let i = 0; i < rows.length; i += batchSize) {
     const chunk = rows.slice(i, i + batchSize);
-    sql += `INSERT INTO ${tableName} (${cols.join(", ")})\nVALUES\n`;
-    const valuesList = chunk.map((r) => {
-      const vals = cols.map((col) => escapeSqlVal((r as any)[col]));
-      return `  (${vals.join(", ")})`;
-    });
-    sql += valuesList.join(",\n");
+    res += `INSERT INTO ${tableName} (${cols.join(", ")})\nVALUES\n`;
+    const vals = chunk.map((r) => `  (${cols.map((col) => escapeSqlVal((r as any)[col])).join(", ")})`);
+    res += vals.join(",\n");
     if (conflictTarget) {
-      sql += `\nON CONFLICT (${conflictTarget}) DO NOTHING;\n\n`;
+      res += `\nON CONFLICT (${conflictTarget}) DO NOTHING;\n\n`;
     } else {
-      sql += `\nON CONFLICT DO NOTHING;\n\n`;
+      res += `\nON CONFLICT DO NOTHING;\n\n`;
     }
   }
+  return res;
 }
 
-dumpTable("schools", "id");
-dumpTable("users", "id");
-dumpTable("user_roles", "id");
-dumpTable("classes", "id");
-dumpTable("children", "id");
-dumpTable("student_class_links", "id");
-dumpTable("teacher_class_links", "id");
-dumpTable("parent_child_links", "id");
-dumpTable("habit_templates", "id");
-dumpTable("habit_template_items", "id");
-dumpTable("checklist_entries", "id");
-dumpTable("points_ledger", "id");
-dumpTable("streak_snapshots", "id");
-dumpTable("checklist_notes", "id");
+// 1. BAGIAN 1: Skema, Sekolah, Guru, 2 Kelas, 50 Siswa, 50 Akun Ortu (~50 KB)
+let part1 = `-- =============================================================================\n`;
+part1 += `-- BAGIAN 1 DARI 4: SKEMA, AKUN GURU, 2 KELAS, 50 SISWA & 50 AKUN ORANG TUA\n`;
+part1 += `-- Ukuran sangat ringan (~50 KB) - Langsung Run di Supabase SQL Editor\n`;
+part1 += `-- =============================================================================\n\n`;
+part1 += ddlSchema;
+part1 += dumpTableRows("schools");
+part1 += dumpTableRows("users");
+part1 += dumpTableRows("user_roles");
+part1 += dumpTableRows("classes");
+part1 += dumpTableRows("children");
+part1 += dumpTableRows("student_class_links");
+part1 += dumpTableRows("teacher_class_links");
+part1 += dumpTableRows("parent_child_links");
+part1 += dumpTableRows("habit_templates");
+part1 += dumpTableRows("habit_template_items");
+fs.writeFileSync(path.join(partsDir, "01_skema_dan_50_siswa.sql"), part1, "utf-8");
 
-fs.writeFileSync(outSqlPath, sql, "utf-8");
-console.log(`✅ Berhasil membuat file SQL Supabase di: ${outSqlPath}`);
-console.log(`Ukuran file: ${(fs.statSync(outSqlPath).size / 1024).toFixed(1)} KB`);
+// 2. BAGIAN 2: Ceklis 4 Agustus - 17 Agustus 2026 (Minggu 1 & 2)
+let part2 = `-- =============================================================================\n`;
+part2 += `-- BAGIAN 2 DARI 4: RIWAYAT CEKLIS PEKAN 1 & 2 (4 AGUSTUS - 17 AGUSTUS 2026)\n`;
+part2 += `-- =============================================================================\n\n`;
+part2 += dumpTableRows("checklist_entries", "entry_date >= '2026-08-04' AND entry_date <= '2026-08-17'");
+fs.writeFileSync(path.join(partsDir, "02_ceklis_pekan_1_dan_2.sql"), part2, "utf-8");
+
+// 3. BAGIAN 3: Ceklis 18 Agustus - 31 Agustus 2026 (Minggu 3 & 4)
+let part3 = `-- =============================================================================\n`;
+part3 += `-- BAGIAN 3 DARI 4: RIWAYAT CEKLIS PEKAN 3 & 4 (18 AGUSTUS - 31 AGUSTUS 2026)\n`;
+part3 += `-- =============================================================================\n\n`;
+part3 += dumpTableRows("checklist_entries", "entry_date >= '2026-08-18' AND entry_date <= '2026-08-31'");
+fs.writeFileSync(path.join(partsDir, "03_ceklis_pekan_3_dan_4.sql"), part3, "utf-8");
+
+// 4. BAGIAN 4: Ceklis 1 September - 20 September 2026 (Minggu 5, 6, 7) + Poin + Streak + Catatan
+let part4 = `-- =============================================================================\n`;
+part4 += `-- BAGIAN 4 DARI 4: RIWAYAT CEKLIS PEKAN 5, 6, 7 (1 - 20 SEPTEMBER 2026) + POIN + STREAK\n`;
+part4 += `-- =============================================================================\n\n`;
+part4 += dumpTableRows("checklist_entries", "entry_date >= '2026-09-01'");
+part4 += dumpTableRows("points_ledger");
+part4 += dumpTableRows("streak_snapshots");
+part4 += dumpTableRows("checklist_notes");
+fs.writeFileSync(path.join(partsDir, "04_ceklis_pekan_5_6_7_dan_rekap.sql"), part4, "utf-8");
+
+// Full SQL File (untuk terminal push langsung)
+const fullSql = part1 + "\n" + part2 + "\n" + part3 + "\n" + part4;
+fs.writeFileSync(outSqlPath, fullSql, "utf-8");
+
+console.log("✅ Berhasil membuat file SQL lengkap di:", outSqlPath);
+console.log("- Ukuran fullSql:", (fs.statSync(outSqlPath).size / 1024).toFixed(1), "KB");
